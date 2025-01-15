@@ -161,7 +161,7 @@ TriggeredSendApplication::StartApplication()
 
         if (returnValue == -1)
         {
-            NS_FATAL_ERROR("Failed to bind socket");
+            NS_FATAL_ERROR("Failed to bind socket for " << m_peer);
         }
 
         m_socket->SetConnectCallback(

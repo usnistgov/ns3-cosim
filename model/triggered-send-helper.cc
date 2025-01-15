@@ -10,7 +10,7 @@ TriggeredSendHelper::TriggeredSendHelper(const std::string& protocol, const Addr
     : ApplicationHelper("ns3::TriggeredSendApplication")
 {
     m_factory.Set("Protocol", StringValue(protocol));
-    m_factory.Set("Remote", AddressValue(address));
+    m_factory.Set("RemoteAddress", AddressValue(address));
 }
 
 } // namespace ns3

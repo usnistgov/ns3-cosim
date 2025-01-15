@@ -1,4 +1,16 @@
 build_lib_example(
+    NAME triggered-send-example
+    SOURCE_FILES triggered-send-example.cc
+    LIBRARIES_TO_LINK
+        ${libns3-cosim}
+        ${libcore}
+        ${libnetwork}
+        ${libinternet}
+        ${libapplications}
+        ${libpoint-to-point}
+)
+
+build_lib_example(
     NAME gateway-test-server
     SOURCE_FILES simple-gateway/gateway-test-server.cc
 )
