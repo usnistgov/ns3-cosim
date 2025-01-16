@@ -11,6 +11,15 @@ build_lib_example(
 )
 
 build_lib_example(
+    NAME external-mobility-example
+    SOURCE_FILES external-mobility-example.cc
+    LIBRARIES_TO_LINK
+        ${libns3-cosim}
+        ${libcore}
+        ${libmobility}
+)
+
+build_lib_example(
     NAME gateway-test-server
     SOURCE_FILES simple-gateway/gateway-test-server.cc
 )
