@@ -1,3 +1,19 @@
+// An Application that sends a specified number of packets when a function is invoked
+// This file is a modified version of onoff-application.cc from ns-3
+// Modified by Thomas Roth <thomas.roth@nist.gov> on Jan 16 2025
+
+////////////////////////////////////////////////////////////////////////////////
+// Original License Statement for onoff-application.cc
+////////////////////////////////////////////////////////////////////////////////
+//
+// Copyright (c) 2006 Georgia Tech Research Corporation
+//
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Author: George F. Riley<riley@ece.gatech.edu>
+//
+////////////////////////////////////////////////////////////////////////////////
+
 #include "triggered-send-application.h"
 
 #include "ns3/inet-socket-address.h"
@@ -80,7 +96,6 @@ TriggeredSendApplication::TriggeredSendApplication()
       m_packetCount(0)
 {
     NS_LOG_FUNCTION(this);
-    CancelEvents(); // TODO: remove
 }
 
 TriggeredSendApplication::~TriggeredSendApplication()
@@ -93,7 +108,11 @@ TriggeredSendApplication::Send(uint32_t numberOfPackets)
 {
     NS_LOG_FUNCTION(this << numberOfPackets);
 
-    if (m_socket && m_connected)
+    if (numberOfPackets == 0)
+    {
+        NS_LOG_WARN("Failed to send packet because numberOfPackets parameter = 0");
+    }
+    else if (m_socket && m_connected)
     {
         if (m_sendPacketEvent.IsPending())
         {
@@ -172,27 +191,12 @@ TriggeredSendApplication::StartApplication()
         {
             m_socket->SetIpTos(m_tos); // Affects only IPv4 sockets.
         }
-
         m_socket->Connect(m_peer);
         m_socket->SetAllowBroadcast(true);
         m_socket->ShutdownRecv(); // disable receive
     }
 
     CancelEvents();
-}
-
-void
-TriggeredSendApplication::ConnectionSucceeded(Ptr<Socket> socket)
-{
-    NS_LOG_FUNCTION(this << socket);
-    m_connected = true;
-}
-
-void
-TriggeredSendApplication::ConnectionFailed(Ptr<Socket> socket)
-{
-    NS_LOG_FUNCTION(this << socket);
-    NS_FATAL_ERROR("Socket failed to connect.");
 }
 
 void
@@ -210,6 +214,20 @@ TriggeredSendApplication::StopApplication()
     {
         NS_LOG_WARN("TriggeredSendApplication found null socket to close in StopApplication");
     }
+}
+
+void
+TriggeredSendApplication::ConnectionSucceeded(Ptr<Socket> socket)
+{
+    NS_LOG_FUNCTION(this << socket);
+    m_connected = true;
+}
+
+void
+TriggeredSendApplication::ConnectionFailed(Ptr<Socket> socket)
+{
+    NS_LOG_FUNCTION(this << socket);
+    NS_FATAL_ERROR("Socket failed to connect.");
 }
 
 void
@@ -231,41 +249,45 @@ TriggeredSendApplication::SendPacket()
 
     NS_ASSERT(m_sendPacketEvent.IsExpired());
 
-    Ptr<Packet> packet = Create<Packet>(m_packetSize);
-
-    int bytesSent = m_socket->Send(packet);
-    if ((unsigned)bytesSent == m_packetSize)
+    if (m_packetCount > 0)
     {
-        Address localAddress;
-        m_socket->GetSockName(localAddress);
-        if (InetSocketAddress::IsMatchingType(m_peer))
+        Ptr<Packet> packet = Create<Packet>(m_packetSize);
+
+        int bytesSent = m_socket->Send(packet);
+        if ((unsigned)bytesSent == m_packetSize)
         {
-            NS_LOG_INFO("At time " << Simulator::Now().As(Time::S)
-                << " triggered send application sent " << packet->GetSize() << " bytes to "
-                << InetSocketAddress::ConvertFrom(m_peer).GetIpv4() << " port "
-                << InetSocketAddress::ConvertFrom(m_peer).GetPort());
-            m_txTraceWithAddresses(packet, localAddress, InetSocketAddress::ConvertFrom(m_peer));
+            Address localAddress;
+            m_socket->GetSockName(localAddress);
+            if (InetSocketAddress::IsMatchingType(m_peer))
+            {
+                NS_LOG_INFO("At time " << Simulator::Now().As(Time::S)
+                    << " triggered send application sent " << packet->GetSize() << " bytes to "
+                    << InetSocketAddress::ConvertFrom(m_peer).GetIpv4() << " port "
+                    << InetSocketAddress::ConvertFrom(m_peer).GetPort());
+                m_txTraceWithAddresses(packet, localAddress, InetSocketAddress::ConvertFrom(m_peer));
+            }
+            else if (Inet6SocketAddress::IsMatchingType(m_peer))
+            {
+                NS_LOG_INFO("At time " << Simulator::Now().As(Time::S)
+                    << " triggered send application sent " << packet->GetSize() << " bytes to "
+                    << Inet6SocketAddress::ConvertFrom(m_peer).GetIpv6() << " port "
+                    << Inet6SocketAddress::ConvertFrom(m_peer).GetPort());
+                m_txTraceWithAddresses(packet, localAddress, Inet6SocketAddress::ConvertFrom(m_peer));
+            }
+            m_txTrace(packet);
         }
-        else if (Inet6SocketAddress::IsMatchingType(m_peer))
+        else
         {
-            NS_LOG_INFO("At time " << Simulator::Now().As(Time::S)
-                << " triggered send application sent " << packet->GetSize() << " bytes to "
-                << Inet6SocketAddress::ConvertFrom(m_peer).GetIpv6() << " port "
-                << Inet6SocketAddress::ConvertFrom(m_peer).GetPort());
-            m_txTraceWithAddresses(packet, localAddress, Inet6SocketAddress::ConvertFrom(m_peer));
+            NS_LOG_DEBUG("Failed to send packet");
         }
-        m_txTrace(packet);
+
+        m_packetCount = m_packetCount - 1;
+        m_sendPacketEvent = Simulator::Schedule(m_packetInterval, &TriggeredSendApplication::SendPacket, this);
     }
     else
     {
-        NS_LOG_DEBUG("Failed to send packet");
-    }
-
-    m_packetCount = m_packetCount - 1;
-
-    if (m_packetCount > 0)
-    {
-        m_sendPacketEvent = Simulator::Schedule(m_packetInterval, &TriggeredSendApplication::SendPacket, this);
+        // this m_packetCount == 0 event ensures the final SendPacket call isn't interrupted before PacketInterval
+        NS_LOG_DEBUG("Finished sending all packets without interruption.");
     }
 }
 
