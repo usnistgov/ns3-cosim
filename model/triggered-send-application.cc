@@ -112,24 +112,12 @@ TriggeredSendApplication::Send(uint32_t numberOfPackets)
     {
         NS_LOG_WARN("Failed to send packet because numberOfPackets parameter = 0");
     }
-    else if (m_socket && m_connected)
-    {
-        if (m_sendPacketEvent.IsPending())
-        {
-            NS_LOG_INFO("TriggeredSendApplication interrupted while sending packets. "
-                << m_packetCount << " packets from a prior call to Send have been cancelled.");
-            m_packetCount = numberOfPackets;
-            // re-use the existing SendPacket event (to maintain packet interval)
-        }
-        else
-        {
-            m_packetCount = numberOfPackets;
-            m_sendPacketEvent = Simulator::ScheduleNow(&TriggeredSendApplication::SendPacket, this);
-        }
-    }
     else
     {
-        NS_LOG_WARN("Failed to send packet because TriggeredSendApplication Socket is not connected.");
+        // This ScheduleNow call avoids a race condition assuming the ns-3 scheduler processes events FIFO.
+        // The ProcessSendRequest call will be placed at the end of the ns-3 event queue, ensuring that any pending
+        // m_sendPacketEvent scheduled for the current time step executes prior to processing this new send request.
+        Simulator::ScheduleNow(&TriggeredSendApplication::ProcessSendRequest, this, numberOfPackets);
     }
 }
 
@@ -239,6 +227,32 @@ TriggeredSendApplication::CancelEvents()
     {
         Simulator::Cancel(m_sendPacketEvent);
         NS_LOG_INFO("Cancelled pending SendPacket event.");
+    }
+}
+
+void
+TriggeredSendApplication::ProcessSendRequest(uint32_t numberOfPackets)
+{
+    NS_LOG_FUNCTION(this << numberOfPackets);
+
+    if (m_socket && m_connected)
+    {
+        if (m_sendPacketEvent.IsPending())
+        {
+            NS_LOG_INFO("TriggeredSendApplication interrupted while sending packets. "
+                << m_packetCount << " packets from a prior call to Send have been cancelled.");
+            m_packetCount = numberOfPackets;
+            // re-use the existing SendPacket event (to maintain packet interval)
+        }
+        else
+        {
+            m_packetCount = numberOfPackets;
+            m_sendPacketEvent = Simulator::ScheduleNow(&TriggeredSendApplication::SendPacket, this);
+        }
+    }
+    else
+    {
+        NS_LOG_WARN("Failed to send packet because TriggeredSendApplication Socket is not connected.");
     }
 }
 

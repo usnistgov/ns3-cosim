@@ -89,6 +89,16 @@ class TriggeredSendApplication : public Application
         void CancelEvents();
 
         /**
+         * @brief A helper method to process calls to TriggerSendApplication:Send.
+         *
+         * The Send method is split into two functions to avoid a race condition when TriggerSendApplication::Send
+         * is called during the simulation time step when the send packet event is scheduled to execute.
+         *
+         * @param numberOfPackets the total number of packets to send
+         */
+        void ProcessSendRequest(uint32_t numberOfPackets);
+
+        /**
          * @brief Send one packet and schedule the next send packet event.
          *
          * A packet will be generated with random data to send to the connected remote endpoint.
