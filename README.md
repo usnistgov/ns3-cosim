@@ -1,3 +1,87 @@
+# Co-Simulation of ns-3 Network Models
+
+provide a mechanism to connect ns-3 models to external code using a simple TCP/IP client/server architecture.
+
+name refers to ns-3 co-simulation, define it a bit
+
+provide definition of co-simulation; and why someone would want to use it
+>> for instance - a traffic simulation can provide better mobility models than ns-3
+>> in these instances, require a mechanism to link the two simulations
+
+https://eclipse.dev/sumo/
+
+developed based on FdNetDevice; for AV
+
+NOTE separate branch for NIST AV Work
+
+# Installation
+
+REQUIREMENTS
+
+Ubuntu 22.04
+ns-3 V2X v1.1
+NR V2X v1.1
+
+ns3
+git No minimum version
+g++ >= 10.5.0
+python3 >= 3.8
+cmake >= 3.13
+make No mimum version
+
+nr
+sudo apt-get install libc6-dev libeigen3-dev sqlite sqlite3 libsqlite3-dev
+
+git clone --branch ns-3-dev-v2x-v1.1 https://gitlab.com/cttc-lena/ns-3-dev.git
+cd ns-3-dev/contrib
+git clone --branch v2x-1.1 https://gitlab.com/cttc-lena/nr.git
+git clone https://github.com/usnistgov/ns3-cosim.git
+
+IF NETSIMULYZER
+git clone https://github.com/usnistgov/NetSimulyzer-ns3-module netsimulyzer
+
+MUST MATCH :
+ns-3-dev
+ - contrib
+  - nr
+  - ns3-cosim
+  - netsimulyzer
+
+cd ../..
+./ns3 configure --enable-tests --enable-examples
+
+Output will include Modules configured to be built:
+Ensure the modules listed include those specified above
+
+./ns3 build
+
+# Examples
+
+run from the ns3-dev folder (not repository root director) where the ns3 file exists
+
+## link
+
+Brief Description + How To Run
+
+
+REFERENCES :
+https://gitlab.com/cttc-lena/nr
+https://github.com/usnistgov/NetSimulyzer
+https://github.com/usnistgov/NetSimulyzer-ns3-module
+
+
+
+
+# Third-Party Licenses
+
+This repository includes modified ns-3 source code distributed under the GNU General Public License, Version 2.
+All modified files include their original attributions in a comment header, and their respective licensing statements
+can be found in the ``LICENSE`` directory of this repository.
+
+# Contact Information
+
+# Citation Information
+
 # NIST Open-Source Software Repository Template
 
 Use of GitHub by NIST employees for government work is subject to
