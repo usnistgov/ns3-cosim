@@ -20,6 +20,17 @@ build_lib_example(
 )
 
 build_lib_example(
+    NAME gateway-vehicle-example
+    SOURCE_FILES simple-gateway/gateway-vehicle-example.cc
+    LIBRARIES_TO_LINK
+        ${libcore}
+        ${libnetwork}
+        ${libinternet}
+        ${libcsma}
+        ${libapplications}
+)
+
+build_lib_example(
     NAME gateway-test-server
     SOURCE_FILES simple-gateway/gateway-test-server.cc
 )
