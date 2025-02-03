@@ -16,6 +16,8 @@
 #include <iostream>
 #include <queue>
 
+#include <string>
+
 using namespace std;
 
 namespace ns3 {
@@ -26,6 +28,8 @@ namespace ns3 {
 
         public:
             Gateway();
+
+            ~Gateway();
             
             /*
             Connects to the "server" socket
@@ -55,6 +59,8 @@ namespace ns3 {
 
             bool isServerTermination();
 
+            void Connect(const std::string & serverAddress, int serverPort);
+
         protected:
             int status;
             int valread;
@@ -66,8 +72,8 @@ namespace ns3 {
             struct sockaddr_in serverAddress;
             thread listenerThread;
             
-            const size_t BUFFER_LENGTH = 1024;
-            char buffer[1024];
+            static const size_t BUFFER_LENGTH = 1024;
+            char buffer[BUFFER_LENGTH];
             size_t bufferIndex;
             queue<string> queueData;
             
@@ -76,7 +82,7 @@ namespace ns3 {
             /*
             stores incoming data into a data structure
             */
-            void receive_callback(char* received_data);
+            void receive_callback(std::string stringData);
 
             virtual void processData(string data) = 0;
     
@@ -85,6 +91,27 @@ namespace ns3 {
             const double SIDELINKDURATION = 1.0;
             bool braking = false;
             bool serverTermination = false;
+        private:
+            enum STATE
+            {
+                CREATED,
+                CONNECTED,
+                STOPPING,
+                STOPPED
+            };
+
+            bool CreateSocketConnection(const std::string & serverAddress, int serverPort);
+
+            void RunThread();
+            void StopThread();
+
+            STATE m_state;
+            bool m_isRunning;
+            uint32_t m_nodeId;
+            int m_clientSocket;
+            std::thread m_thread;
+            std::string m_message;
+            EventId m_destroyEvent;
     };
 }
 #endif // GATEWAY_H

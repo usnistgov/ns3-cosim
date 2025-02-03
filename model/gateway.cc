@@ -16,71 +16,122 @@
 #include "gateway.h"
 using namespace std;
 
+namespace ns3
+{
 
-namespace ns3 {
-    NS_LOG_COMPONENT_DEFINE("Gateway");
+NS_LOG_COMPONENT_DEFINE("Gateway");
 
-    Gateway::Gateway(): isInitialized(false),destroyEvent()  {
-        NS_LOG_FUNCTION(this);
-        memset(buffer, 0, sizeof(buffer));
-        bufferIndex = 0;
-        // for(int i = 0; i < 4; ++i)  { ???
-        //     queueData.push("0.0");
-        // }
-        m_node = Simulator::GetContext();
-        
+Gateway::Gateway():
+    m_destroyEvent()
+{
+    NS_LOG_FUNCTION(this);
+
+    m_nodeId = Simulator::GetContext();
+    m_state = STATE::CREATED;
+}
+
+Gateway::~Gateway()
+{
+    NS_LOG_FUNCTION(this);
+    StopThread();
+}
+
+void
+Gateway::Connect(const std::string & serverAddress, int serverPort)
+{
+    NS_LOG_FUNCTION(this << serverAddress << serverPort);
+
+    if (m_state != STATE::CREATED) // prevent duplicate calls
+    {
+        NS_LOG_ERROR("ERROR: failed to connect the gateway to "
+            << serverAddress << ":" << serverPort
+            << " due to a previous connection attempt"
+        );
+        return;
     }
 
-    int Gateway::initialize(const char *address, int portNum)    {
-        NS_LOG_FUNCTION(this);
-        if(isInitialized == false)  {
-            //STILL NEED TO IMPLEMENT NS3 LOGGER
-            NS_LOG_INFO("Gateway is initializing");
+    if (CreateSocketConnection(serverAddress, serverPort))
+    {
+        // schedule a function to stop the socket thread when ns-3 ends
+        m_destroyEvent = Simulator::ScheduleDestroy(&Gateway::StopThread, this);
 
-            connectToServer(address, portNum);
-        
-            if (!destroyEvent.IsRunning())
-            {
-                destroyEvent = Simulator::ScheduleDestroy(&Gateway::stop, this);
-            }
+        // start a thread to handle the socket connection
+        m_thread = thread(&Gateway::RunThread, this);
 
-            //Setup Listener Thread
-            listenerThread = thread(&Gateway::listener, this);
+        // start time management (TODO)
 
-            isInitialized = true;
-        }
-        else    {   NS_LOG_LOGIC("Gateway is already initialized");   }
-
-        return 0;
-    } 
-    int Gateway::connectToServer(const char *address, int portNum) {
-        NS_LOG_FUNCTION(this);
-        //create the socket
-        if ((clientFD = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-            NS_LOG_ERROR("Socket Creation Error");
-            return -2;
-        }
-
-        //setup the server address
-        serverAddress.sin_family = AF_INET;
-        serverAddress.sin_port = htons(portNum);
-
-        // Convert IPv4 and IPv6 addresses from text to binary form
-        if (inet_pton(AF_INET, address, &serverAddress.sin_addr)
-            <= 0) {
-            NS_LOG_ERROR("Invalid address/ Address not supported");
-            return -3;
-        }
-                
-        //connect to the server
-        if (connect(clientFD, reinterpret_cast<sockaddr*>(&serverAddress), sizeof(serverAddress)) == -1) {
-            NS_LOG_ERROR("Connection Failed");
-            return -4;
-        }
-        NS_LOG_INFO("Connected to Server");
-        return 0;
-
+        m_state = STATE::CONNECTED;
+        NS_LOG_INFO("Connected the gateway to "
+            << serverAddress << ":" << serverPort
+        );
     }
+}
+
+bool
+Gateway::CreateSocketConnection(const std::string & serverAddress, int serverPort)
+{
+    NS_LOG_FUNCTION(this << serverAddress << serverPort);
+
+    // create the client socket
+    m_clientSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (m_clientSocket < 0)
+    {
+        NS_LOG_ERROR("ERROR: failed to create socket");
+        return false;
+    }
+
+    // set the server address
+    struct sockaddr_in socketAddress;
+    socketAddress.sin_family = AF_INET;
+    socketAddress.sin_port = htons(serverPort);
+    if (inet_pton(AF_INET, serverAddress.c_str(), &socketAddress.sin_addr) <= 0)
+    {
+        NS_LOG_ERROR("ERROR: failed to resolve the address " << serverAddress);
+        return false;
+    }
+
+    // connect to the server
+    if (connect(m_clientSocket, (struct sockaddr *)&socketAddress, sizeof(socketAddress)) < 0)
+    {
+        NS_LOG_ERROR("ERROR: failed to connect to "
+            << serverAddress << ":" << serverPort
+            << " (check if the server is online)"
+        );
+        return false;
+    }
+
+    return true;
+}
+
+void
+Gateway::RunThread()
+{
+}
+
+void
+Gateway::StopThread()
+{
+    NS_LOG_FUNCTION(this);
+
+    if (m_state == STATE::CONNECTED)
+    {
+        m_state = STATE::STOPPING; // trigger the thread to stop
+
+        if (m_thread.joinable())
+        {
+            NS_LOG_INFO("Waiting for the gateway thread to stop...");
+            m_thread.join(); // wait for the thread to stop
+            NS_LOG_INFO("...gateway thread stopped.");
+        }
+
+        close(m_clientSocket);
+    }
+    else
+    {
+        NS_LOG_LOGIC("Gateway::StopThread skipped - the gateway is not connected");
+    }
+}
+
     void Gateway::sendData(int socketFD, const string& data)    {
         NS_LOG_FUNCTION(this);
         NS_LOG_INFO("Sending Data");
@@ -92,35 +143,44 @@ namespace ns3 {
     void Gateway::listener() {
         NS_LOG_FUNCTION(this);
         NS_LOG_INFO("Listener Thread Started");
-        int bytesReceived = 0;
 
-        for(;;) {
-            bufferIndex = 0;
+        while (!killListener)
+        {
+            bool socketError = false;
+            bool messageReceived = false;
+            m_message.clear();
+            do
+            {
+                int bytesReceived = recv(clientFD, &buffer[0], BUFFER_LENGTH, 0);
 
-            while (bufferIndex < BUFFER_LENGTH && (bytesReceived = recv(clientFD, &buffer[bufferIndex], BUFFER_LENGTH - bufferIndex, 0)) > 0){
-                bufferIndex += bytesReceived;
-                
-                if (bufferIndex > 1 && '\r' == buffer[bufferIndex-2] && '\n' == buffer[bufferIndex-1])    {
-                    buffer[bufferIndex-1] = '\0';
-                    buffer[bufferIndex-2] = '\0';
-                    NS_LOG_INFO("Received Data: " << buffer);
-                    receive_callback(buffer);
-                    break;
+                if (bytesReceived < 0)
+                {
+                    NS_LOG_ERROR("socket connection error");
+                    socketError = true;
                 }
+                else if (bytesReceived == 0)
+                {
+                    NS_LOG_ERROR("socket terminated");
+                    socketError = true;
+                }
+                else
+                {
+                    m_message.append(&buffer[0], bytesReceived); // size_t
+
+                    if (m_message.size() >= 4 && m_message.compare(m_message.size() - 1, 1, "\n") == 0)
+                    {
+                        messageReceived = true; // need to look for termintaing
+                    }
+                }
+            } while(!messageReceived && !socketError);
+
+            if (messageReceived)
+            {
+                NS_LOG_INFO("Received Data: " << m_message);
+                receive_callback(m_message);
             }
-            if(bytesReceived == 0)   {
-                NS_LOG_INFO("Connection Closed");
-                break;
-            }
-            if(bytesReceived == -1)   {
-                NS_LOG_ERROR("Error Reading Data");
-                break;
-            }
-            if(killListener)    {
-                break;
-            }            
         }
-       
+        NS_LOG_INFO("listener stopped");
     }
 
     void Gateway::stop() {
@@ -138,13 +198,8 @@ namespace ns3 {
         close(clientFD);
     }
     
-    void Gateway::receive_callback(char* received_data)   {
+    void Gateway::receive_callback(std::string stringData)   {
         NS_LOG_FUNCTION(this);
-        if(received_data == NULL)   {
-            NS_LOG_ERROR("Received Data is NULL");
-            return;
-        }
-        string stringData = received_data;
         
         queueLock.lock();
         queueData.push(stringData);
@@ -183,4 +238,5 @@ namespace ns3 {
     bool Gateway::isServerTermination()  {
         return serverTermination;
     }
-};
+
+} // namespace ns3
