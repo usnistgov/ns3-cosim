@@ -1,5 +1,40 @@
+/*
+ * NIST-developed software is provided by NIST as a public service. You may use,
+ * copy, and distribute copies of the software in any medium, provided that you
+ * keep intact this entire notice. You may improve, modify, and create
+ * derivative works of the software or any portion of the software, and you may
+ * copy and distribute such modifications or works. Modified works should carry
+ * a notice stating that you changed the software and should note the date and
+ * nature of any such change. Please explicitly acknowledge the National
+ * Institute of Standards and Technology as the source of the software. 
+ *
+ * NIST-developed software is expressly provided "AS IS." NIST MAKES NO WARRANTY
+ * OF ANY KIND, EXPRESS, IMPLIED, IN FACT, OR ARISING BY OPERATION OF LAW,
+ * INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTY OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, NON-INFRINGEMENT, AND DATA ACCURACY. NIST
+ * NEITHER REPRESENTS NOR WARRANTS THAT THE OPERATION OF THE SOFTWARE WILL BE
+ * UNINTERRUPTED OR ERROR-FREE, OR THAT ANY DEFECTS WILL BE CORRECTED. NIST DOES
+ * NOT WARRANT OR MAKE ANY REPRESENTATIONS REGARDING THE USE OF THE SOFTWARE OR
+ * THE RESULTS THEREOF, INCLUDING BUT NOT LIMITED TO THE CORRECTNESS, ACCURACY,
+ * RELIABILITY, OR USEFULNESS OF THE SOFTWARE.
+ * 
+ * You are solely responsible for determining the appropriateness of using and
+ * distributing the software and you assume all risks associated with its use,
+ * including but not limited to the risks and costs of program errors,
+ * compliance with applicable laws, damage to or loss of data, programs or
+ * equipment, and the unavailability or interruption of operation. This software 
+ * is not intended to be used in any situation where a failure could cause risk
+ * of injury or damage to property. The software developed by NIST employees is
+ * not subject to copyright protection within the United States.
+ *
+ * Authors:
+ *  Thomas Roth <thomas.roth@nist.gov>
+ *  Benjamin Philipose
+*/
+
 #ifndef GATEWAY_H
 #define GATEWAY_H
+
 #include <arpa/inet.h>
 #include <stdio.h>
 #include <string.h>
@@ -9,7 +44,6 @@
 #include <iostream>
 #include <sstream>
 
-//My imports
 #include <thread>
 #include <mutex>
 #include <fstream>
@@ -18,100 +52,43 @@
 
 #include <string>
 
-using namespace std;
+namespace ns3
+{
 
-namespace ns3 {
+class Gateway
+{
+    public:
+        Gateway();
 
-    //My class
-    class Gateway   {
+        void Connect(const std::string & serverAddress, int serverPort);
+    private:
+        enum STATE
+        {
+            CREATED,
+            CONNECTED,
+            STOPPING,
+            STOPPED,
+            ERROR
+        };
 
+        bool CreateSocketConnection(const std::string & serverAddress, int serverPort);
 
-        public:
-            Gateway();
+        void RunThread();
+        void StopThread();
+        void ForwardUp();
 
-            ~Gateway();
-            
-            /*
-            Connects to the "server" socket
-            initiates a thread to run listen() 
-            */
-            int initialize(const char *address, int portNum);
+        std::string ReceiveNextMessage();
+        bool StringEndsWith(const std::string & str, const char * token);
 
-            void sendData(int socketFD, const string& data);
+        STATE m_state;
+        uint32_t m_nodeId;
+        int m_clientSocket;
+        std::thread m_thread;
+        std::queue<std::string> m_messageQueue;
+        std::mutex m_messageQueueMutex;
+        EventId m_destroyEvent;
+};
 
-            /*
-            Listens for incoming packets indefinetly
-            */
-            void listener();
-            
-            /*
-            Pops data from the datastructure
-            Then sends data (x/y/z/t_brake) to ns-3 nodes/apps
-            */
-            void forward_up();
+} // namespace ns3
 
-            /*
-            closes all open resources encapsulated by the gateway
-            */
-            void stop();
-
-            virtual void notify();
-
-            bool isServerTermination();
-
-            void Connect(const std::string & serverAddress, int serverPort);
-
-        protected:
-            int status;
-            int valread;
-            int clientFD;
-            bool isInitialized;
-            EventId destroyEvent;
-            mutex queueLock;
-            uint32_t m_node; 
-            struct sockaddr_in serverAddress;
-            thread listenerThread;
-            
-            static const size_t BUFFER_LENGTH = 1024;
-            char buffer[BUFFER_LENGTH];
-            size_t bufferIndex;
-            queue<string> queueData;
-            
-            int connectToServer(const char *address, int portNum);      
-
-            /*
-            stores incoming data into a data structure
-            */
-            void receive_callback(std::string stringData);
-
-            virtual void processData(string data) = 0;
-    
-            mutex m_lock;
-            bool killListener = false;
-            const double SIDELINKDURATION = 1.0;
-            bool braking = false;
-            bool serverTermination = false;
-        private:
-            enum STATE
-            {
-                CREATED,
-                CONNECTED,
-                STOPPING,
-                STOPPED
-            };
-
-            bool CreateSocketConnection(const std::string & serverAddress, int serverPort);
-
-            void RunThread();
-            void StopThread();
-
-            STATE m_state;
-            bool m_isRunning;
-            uint32_t m_nodeId;
-            int m_clientSocket;
-            std::thread m_thread;
-            std::string m_message;
-            EventId m_destroyEvent;
-    };
-}
-#endif // GATEWAY_H
+#endif /* GATEWAY_H */

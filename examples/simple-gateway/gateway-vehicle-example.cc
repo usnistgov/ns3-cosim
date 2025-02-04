@@ -69,16 +69,21 @@ ReportMobility(Ptr<const MobilityModel> mobility)
         << ", Velocity " << mobility->GetVelocity());
 }
 
+void
+DoNothing()
+{
+    NS_LOG_INFO("nothing is done");
+}
+
 // TODO:
 //  wait for server to exist / attempt to re-connect
 //  move the time sync stuff into base gateway (as 1st row of data)
 //  improve send method
 class GatewayImplementation : public Gateway
 {
-    private:
-        virtual void processData(std::string data);
 };
 
+/*
 void
 GatewayImplementation::processData(std::string data)
 {
@@ -86,6 +91,7 @@ GatewayImplementation::processData(std::string data)
     std::string response = "0 0 0\r\n";
     send(clientFD, response.c_str(), response.size(), 0);
 }
+*/
 
 int
 main(int argc, char* argv[])
@@ -166,7 +172,9 @@ main(int argc, char* argv[])
     const uint16_t gatewayPort = 1111;
 
     GatewayImplementation gateway;
-    gateway.initialize(gatewayAddress.c_str(), gatewayPort); // server must be running before this line (or error)
+    gateway.Connect(gatewayAddress, gatewayPort); // server must be running before this line (or error)
+
+    Simulator::Schedule(Seconds(10), &DoNothing);
 
     Simulator::Stop(timeStop);
     Simulator::Run();

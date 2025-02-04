@@ -1,3 +1,37 @@
+/*
+ * NIST-developed software is provided by NIST as a public service. You may use,
+ * copy, and distribute copies of the software in any medium, provided that you
+ * keep intact this entire notice. You may improve, modify, and create
+ * derivative works of the software or any portion of the software, and you may
+ * copy and distribute such modifications or works. Modified works should carry
+ * a notice stating that you changed the software and should note the date and
+ * nature of any such change. Please explicitly acknowledge the National
+ * Institute of Standards and Technology as the source of the software. 
+ *
+ * NIST-developed software is expressly provided "AS IS." NIST MAKES NO WARRANTY
+ * OF ANY KIND, EXPRESS, IMPLIED, IN FACT, OR ARISING BY OPERATION OF LAW,
+ * INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTY OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, NON-INFRINGEMENT, AND DATA ACCURACY. NIST
+ * NEITHER REPRESENTS NOR WARRANTS THAT THE OPERATION OF THE SOFTWARE WILL BE
+ * UNINTERRUPTED OR ERROR-FREE, OR THAT ANY DEFECTS WILL BE CORRECTED. NIST DOES
+ * NOT WARRANT OR MAKE ANY REPRESENTATIONS REGARDING THE USE OF THE SOFTWARE OR
+ * THE RESULTS THEREOF, INCLUDING BUT NOT LIMITED TO THE CORRECTNESS, ACCURACY,
+ * RELIABILITY, OR USEFULNESS OF THE SOFTWARE.
+ * 
+ * You are solely responsible for determining the appropriateness of using and
+ * distributing the software and you assume all risks associated with its use,
+ * including but not limited to the risks and costs of program errors,
+ * compliance with applicable laws, damage to or loss of data, programs or
+ * equipment, and the unavailability or interruption of operation. This software 
+ * is not intended to be used in any situation where a failure could cause risk
+ * of injury or damage to property. The software developed by NIST employees is
+ * not subject to copyright protection within the United States.
+ *
+ * Authors:
+ *  Thomas Roth <thomas.roth@nist.gov>
+ *  Benjamin Philipose
+*/
+
 #include "ns3/applications-module.h"
 
 #include <arpa/inet.h>
@@ -14,7 +48,6 @@
 #include "ns3/log.h"
 
 #include "gateway.h"
-using namespace std;
 
 namespace ns3
 {
@@ -28,12 +61,6 @@ Gateway::Gateway():
 
     m_nodeId = Simulator::GetContext();
     m_state = STATE::CREATED;
-}
-
-Gateway::~Gateway()
-{
-    NS_LOG_FUNCTION(this);
-    StopThread();
 }
 
 void
@@ -52,18 +79,18 @@ Gateway::Connect(const std::string & serverAddress, int serverPort)
 
     if (CreateSocketConnection(serverAddress, serverPort))
     {
+        m_state = STATE::CONNECTED; // set before RunThread
+        NS_LOG_INFO("Connected the gateway to "
+            << serverAddress << ":" << serverPort
+        );
+
         // schedule a function to stop the socket thread when ns-3 ends
         m_destroyEvent = Simulator::ScheduleDestroy(&Gateway::StopThread, this);
 
         // start a thread to handle the socket connection
-        m_thread = thread(&Gateway::RunThread, this);
+        m_thread = std::thread(&Gateway::RunThread, this);
 
         // start time management (TODO)
-
-        m_state = STATE::CONNECTED;
-        NS_LOG_INFO("Connected the gateway to "
-            << serverAddress << ":" << serverPort
-        );
     }
 }
 
@@ -104,11 +131,6 @@ Gateway::CreateSocketConnection(const std::string & serverAddress, int serverPor
 }
 
 void
-Gateway::RunThread()
-{
-}
-
-void
 Gateway::StopThread()
 {
     NS_LOG_FUNCTION(this);
@@ -132,111 +154,103 @@ Gateway::StopThread()
     }
 }
 
-    void Gateway::sendData(int socketFD, const string& data)    {
-        NS_LOG_FUNCTION(this);
-        NS_LOG_INFO("Sending Data");
-        if(-1==send(socketFD, data.c_str(), data.length(), 0)) {
-            NS_LOG_ERROR("Error Sending Data");
-        }
-    }
+void
+Gateway::RunThread()
+{
+    NS_LOG_FUNCTION(this);
 
-    void Gateway::listener() {
-        NS_LOG_FUNCTION(this);
-        NS_LOG_INFO("Listener Thread Started");
+    while (m_state == STATE::CONNECTED)
+    {
+        std::string message = ReceiveNextMessage();
 
-        while (!killListener)
+        // the RunThread needs the main thread to execute a function (either StopThread or ForwardUp)
+        // it schedules the function for this time step on behalf of the main thread's m_nodeId
+        // then, Simulator::Run from the main thread will process the scheduled function
+        if (message.empty()) // TODO: test whether this works as intended
         {
-            bool socketError = false;
-            bool messageReceived = false;
-            m_message.clear();
-            do
-            {
-                int bytesReceived = recv(clientFD, &buffer[0], BUFFER_LENGTH, 0);
-
-                if (bytesReceived < 0)
-                {
-                    NS_LOG_ERROR("socket connection error");
-                    socketError = true;
-                }
-                else if (bytesReceived == 0)
-                {
-                    NS_LOG_ERROR("socket terminated");
-                    socketError = true;
-                }
-                else
-                {
-                    m_message.append(&buffer[0], bytesReceived); // size_t
-
-                    if (m_message.size() >= 4 && m_message.compare(m_message.size() - 1, 1, "\n") == 0)
-                    {
-                        messageReceived = true; // need to look for termintaing
-                    }
-                }
-            } while(!messageReceived && !socketError);
-
-            if (messageReceived)
-            {
-                NS_LOG_INFO("Received Data: " << m_message);
-                receive_callback(m_message);
-            }
+            NS_LOG_ERROR("Stopping the gateway thread due to a receive error");
+            Simulator::ScheduleWithContext(m_nodeId, Time(0), MakeEvent(&Gateway::StopThread, this));
+            break; // prevent additional receive attempts
         }
-        NS_LOG_INFO("listener stopped");
+        else
+        {   // critical section start
+            std::unique_lock lock(m_messageQueueMutex);
+            NS_LOG_LOGIC("Pushing a new message to the gateway message queue");
+            m_messageQueue.push(message);
+            Simulator::ScheduleWithContext(m_nodeId, Time(0), MakeEvent(&Gateway::ForwardUp, this));
+        }   // critical section end
     }
+}
 
-    void Gateway::stop() {
-        NS_LOG_FUNCTION(this);
-        NS_LOG_INFO("Stopping Gateway");
+std::string
+Gateway::ReceiveNextMessage()
+{
+    NS_LOG_FUNCTION(this);
 
-        killListener = true;
+    const char END_TOKEN[] = "\n";
+    const size_t BUFFER_LENGTH = 4096;
+    char recvBuffer[BUFFER_LENGTH];
 
-        // wait for listenerThread to wrap up
-        if (listenerThread.joinable())
+    std::string message = "";
+
+    do
+    {
+        int bytesReceived = recv(m_clientSocket, &recvBuffer[0], BUFFER_LENGTH, 0);
+
+        if (bytesReceived > 0)
         {
-            listenerThread.join();
+            message.append(&recvBuffer[0], bytesReceived);
         }
-
-        close(clientFD);
-    }
-    
-    void Gateway::receive_callback(std::string stringData)   {
-        NS_LOG_FUNCTION(this);
-        
-        queueLock.lock();
-        queueData.push(stringData);
-        queueLock.unlock();
-
-        Simulator::ScheduleWithContext(m_node, Time(0), MakeEvent(&Gateway::forward_up, this));
-
-    }
-
-    void Gateway::forward_up()  {
-        NS_LOG_FUNCTION(this);
-
-        queueLock.lock();  
-        if(queueData.empty())  { 
-            queueLock.unlock();
-            return; 
+        else if (bytesReceived == 0)
+        {
+            NS_LOG_ERROR("ERROR: gateway socket terminated ");
+            return ""; // message not received
         }
-        string stringData = queueData.front();
-        NS_LOG_INFO("size: " << queueData.size());
-        queueData.pop();
-        queueLock.unlock();
-
-        if(stringData == "-1")  {
-            serverTermination = true; // maybe unnecessary with Stop() ?
-            Simulator::Stop();
-            return;
+        else
+        {
+            NS_LOG_ERROR("ERROR: gateway socket connection error");
+            return ""; // message not received
         }
-        processData(stringData);
     }
+    while(!StringEndsWith(message, END_TOKEN));
 
-    void Gateway::notify() {
-        char continueMessage = '1';  
-        send(clientFD, &continueMessage, sizeof(continueMessage), 0);//signal to server listener is ready
-    }
+    NS_LOG_INFO("gateway received the message: " << message);
 
-    bool Gateway::isServerTermination()  {
-        return serverTermination;
+    return message; // message received
+}
+
+bool
+Gateway::StringEndsWith(const std::string & str, const char * token)
+{
+    const size_t TOKEN_LENGTH = strlen(token);
+
+    if (str.size() >= TOKEN_LENGTH)
+    {
+        if (str.compare(str.size() - TOKEN_LENGTH, TOKEN_LENGTH, token) == 0)
+        {
+            return true;
+        }
     }
+    return false;
+}
+
+void
+Gateway::ForwardUp()
+{
+    NS_LOG_FUNCTION(this);
+
+    std::string message;
+    {   // critical section start
+        std::unique_lock lock(m_messageQueueMutex);
+        message = m_messageQueue.front();
+        m_messageQueue.pop();
+    }   // critical section end
+
+    // process time
+
+    // check termination
+
+    // yield
+}
 
 } // namespace ns3
