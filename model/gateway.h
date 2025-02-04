@@ -71,11 +71,18 @@ class Gateway
             ERROR
         };
 
+        struct ClockValue
+        {
+            int64x64_t seconds;
+            int64x64_t nanoseconds;
+        };
+
         bool CreateSocketConnection(const std::string & serverAddress, int serverPort);
 
         void RunThread();
         void StopThread();
         void ForwardUp();
+        void WaitForNextUpdate();
 
         std::string ReceiveNextMessage();
         bool StringEndsWith(const std::string & str, const char * token);
@@ -87,6 +94,9 @@ class Gateway
         std::queue<std::string> m_messageQueue;
         std::mutex m_messageQueueMutex;
         EventId m_destroyEvent;
+        EventId m_waitEvent;
+
+        Time m_startTime;
 };
 
 } // namespace ns3

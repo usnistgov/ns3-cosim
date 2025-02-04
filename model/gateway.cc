@@ -61,6 +61,7 @@ Gateway::Gateway():
 
     m_nodeId = Simulator::GetContext();
     m_state = STATE::CREATED;
+    m_startTime = Seconds(-1);
 }
 
 void
@@ -90,8 +91,17 @@ Gateway::Connect(const std::string & serverAddress, int serverPort)
         // start a thread to handle the socket connection
         m_thread = std::thread(&Gateway::RunThread, this);
 
-        // start time management (TODO)
+        // start time management
+        NS_LOG_INFO("waiting for next update...");
+        m_waitEvent = Simulator::ScheduleNow(&Gateway::WaitForNextUpdate, this);
     }
+}
+
+void
+Gateway::WaitForNextUpdate()
+{
+    // pause ns-3 time progression until this event is cancelled
+    m_waitEvent = Simulator::ScheduleNow(&Gateway::WaitForNextUpdate, this);
 }
 
 bool
@@ -152,6 +162,12 @@ Gateway::StopThread()
     {
         NS_LOG_LOGIC("Gateway::StopThread skipped - the gateway is not connected");
     }
+
+    if (m_waitEvent.IsPending())
+    {
+        m_waitEvent.Cancel();
+        NS_LOG_INFO("Cancelled a pending WaitForNextUpdate");
+    }
 }
 
 void
@@ -187,7 +203,7 @@ Gateway::ReceiveNextMessage()
 {
     NS_LOG_FUNCTION(this);
 
-    const char END_TOKEN[] = "\n";
+    const char END_TOKEN[] = "\r\n\r\n";
     const size_t BUFFER_LENGTH = 4096;
     char recvBuffer[BUFFER_LENGTH];
 
@@ -246,11 +262,71 @@ Gateway::ForwardUp()
         m_messageQueue.pop();
     }   // critical section end
 
-    // process time
+    const char DATA_SEPERATOR[] = "\r\n";
+    const char VALUE_SEPERATOR[] = " ";
 
-    // check termination
+    Time clockValue = Time(-1);
+    std::map<std::string, std::string> content;
 
-    // yield
+    // GIVEN ReceiveNextMessage returns a string that ends with \r\n\r\n
+    // GIVEN m_messageQueue only contains values returned by ReceiveNextMessage
+    // THEN  This while loop will eventually result in message == \r\n
+    NS_LOG_DEBUG("Processing message...");
+    while (message != DATA_SEPERATOR)
+    {
+        size_t index = message.find(DATA_SEPERATOR); // cannot be std::string::npos
+        std::string data = message.substr(0, index);
+        message.erase(0, index + strlen(DATA_SEPERATOR));
+
+        index = data.find(VALUE_SEPERATOR);
+        if (index == std::string::npos)
+        {
+            NS_LOG_ERROR("ERROR: bad message format, " << data);
+            return;
+        }
+
+        std::string first = data.substr(0, index);
+        
+        std::string second;
+        if (index == data.size() - strlen(VALUE_SEPERATOR)) // the last character
+        {
+            second = "";
+        }
+        else
+        {
+            second = data.substr(index + strlen(VALUE_SEPERATOR));
+        }
+
+        NS_LOG_DEBUG("\textracted: (" << first << "," << second << ")");
+
+        if (clockValue.IsNegative()) // first iteration
+        {
+            try
+            {
+                // the two values will be signed int32
+                clockValue = Seconds(std::stoi(first)) + NanoSeconds(std::stoi(second));
+            }
+            catch (std::exception & e)
+            {
+                NS_LOG_ERROR("ERROR: bad message timestamp");
+                return;
+            }
+        }
+        else
+        {
+            if (content.count(first) > 0)
+            {
+                NS_LOG_ERROR("ERROR: message contains duplicate values");
+            }
+            content[first] = second;
+        }
+    }
+    NS_LOG_DEBUG("...message processed");
+
+    // if clock negative then terminate
+    // calculate the time_delta (if negative, error)
+    // schedule processing content at time_delta
+    // somewhere, cancel pending wait events
 }
 
 } // namespace ns3
