@@ -75,23 +75,37 @@ DoNothing()
     NS_LOG_INFO("nothing is done");
 }
 
+void
+StringWeirdness(std::string hahah)
+{
+    std::string newValue(hahah);
+    newValue.append("a");
+    NS_LOG_INFO(hahah);
+    Simulator::Schedule(Seconds(1), &StringWeirdness, newValue);
+}
+
 // TODO:
 //  wait for server to exist / attempt to re-connect
 //  move the time sync stuff into base gateway (as 1st row of data)
 //  improve send method
 class GatewayImplementation : public Gateway
 {
-};
+    virtual void DoInitialize(const std::string & data);
+    virtual void DoUpdate(const std::string & data);
+};   
 
-/*
 void
-GatewayImplementation::processData(std::string data)
+GatewayImplementation::DoInitialize(const std::string & data)
+{
+    NS_LOG_INFO("Received data: " << data);
+    SendData("3"); // number of nodes
+}
+
+void
+GatewayImplementation::DoUpdate(const std::string & data)
 {
     NS_LOG_INFO(data);
-    std::string response = "0 0 0\r\n";
-    send(clientFD, response.c_str(), response.size(), 0);
 }
-*/
 
 int
 main(int argc, char* argv[])
@@ -175,6 +189,9 @@ main(int argc, char* argv[])
     gateway.Connect(gatewayAddress, gatewayPort); // server must be running before this line (or error)
 
     Simulator::Schedule(Seconds(10), &DoNothing);
+
+    Simulator::Schedule(Seconds(1), &StringWeirdness, "1");
+    Simulator::Schedule(Seconds(1.5), &StringWeirdness, "1.5");
 
     Simulator::Stop(timeStop);
     Simulator::Run();

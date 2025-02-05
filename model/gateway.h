@@ -61,7 +61,13 @@ class Gateway
         Gateway();
 
         void Connect(const std::string & serverAddress, int serverPort);
+    protected:
+        void SendData(const std::string & data);
     private:
+        static const char * SEPARATOR_HEADER;
+        static const char * SEPARATOR_MESSAGE;
+        static const size_t BUFFER_SIZE = 4096;
+
         enum STATE
         {
             CREATED,
@@ -87,6 +93,11 @@ class Gateway
         std::string ReceiveNextMessage();
         bool StringEndsWith(const std::string & str, const char * token);
 
+        void HandleUpdate(std::string data);
+
+        virtual void DoInitialize(const std::string & data) = 0;
+        virtual void DoUpdate(const std::string & data) = 0;
+
         STATE m_state;
         uint32_t m_nodeId;
         int m_clientSocket;
@@ -97,6 +108,7 @@ class Gateway
         EventId m_waitEvent;
 
         Time m_startTime;
+        Time m_receivedTime;
 };
 
 } // namespace ns3

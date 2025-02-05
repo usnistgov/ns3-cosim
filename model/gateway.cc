@@ -54,6 +54,9 @@ namespace ns3
 
 NS_LOG_COMPONENT_DEFINE("Gateway");
 
+const char * Gateway::SEPARATOR_HEADER = "\r\n";
+const char * Gateway::SEPARATOR_MESSAGE = "\r\n\r\n";
+
 Gateway::Gateway():
     m_destroyEvent()
 {
@@ -203,15 +206,13 @@ Gateway::ReceiveNextMessage()
 {
     NS_LOG_FUNCTION(this);
 
-    const char END_TOKEN[] = "\r\n\r\n";
-    const size_t BUFFER_LENGTH = 4096;
-    char recvBuffer[BUFFER_LENGTH];
+    char recvBuffer[BUFFER_SIZE];
 
     std::string message = "";
 
     do
     {
-        int bytesReceived = recv(m_clientSocket, &recvBuffer[0], BUFFER_LENGTH, 0);
+        int bytesReceived = recv(m_clientSocket, &recvBuffer[0], BUFFER_SIZE, 0);
 
         if (bytesReceived > 0)
         {
@@ -228,7 +229,7 @@ Gateway::ReceiveNextMessage()
             return ""; // message not received
         }
     }
-    while(!StringEndsWith(message, END_TOKEN));
+    while(!StringEndsWith(message, SEPARATOR_MESSAGE));
 
     NS_LOG_INFO("gateway received the message: " << message);
 
@@ -262,71 +263,86 @@ Gateway::ForwardUp()
         m_messageQueue.pop();
     }   // critical section end
 
-    const char DATA_SEPERATOR[] = "\r\n";
-    const char VALUE_SEPERATOR[] = " ";
-
-    Time clockValue = Time(-1);
-    std::map<std::string, std::string> content;
-
-    // GIVEN ReceiveNextMessage returns a string that ends with \r\n\r\n
-    // GIVEN m_messageQueue only contains values returned by ReceiveNextMessage
-    // THEN  This while loop will eventually result in message == \r\n
-    NS_LOG_DEBUG("Processing message...");
-    while (message != DATA_SEPERATOR)
+    size_t index = message.find(SEPARATOR_HEADER);
+    if (index == std::string::npos)
     {
-        size_t index = message.find(DATA_SEPERATOR); // cannot be std::string::npos
-        std::string data = message.substr(0, index);
-        message.erase(0, index + strlen(DATA_SEPERATOR));
-
-        index = data.find(VALUE_SEPERATOR);
-        if (index == std::string::npos)
-        {
-            NS_LOG_ERROR("ERROR: bad message format, " << data);
-            return;
-        }
-
-        std::string first = data.substr(0, index);
-        
-        std::string second;
-        if (index == data.size() - strlen(VALUE_SEPERATOR)) // the last character
-        {
-            second = "";
-        }
-        else
-        {
-            second = data.substr(index + strlen(VALUE_SEPERATOR));
-        }
-
-        NS_LOG_DEBUG("\textracted: (" << first << "," << second << ")");
-
-        if (clockValue.IsNegative()) // first iteration
-        {
-            try
-            {
-                // the two values will be signed int32
-                clockValue = Seconds(std::stoi(first)) + NanoSeconds(std::stoi(second));
-            }
-            catch (std::exception & e)
-            {
-                NS_LOG_ERROR("ERROR: bad message timestamp");
-                return;
-            }
-        }
-        else
-        {
-            if (content.count(first) > 0)
-            {
-                NS_LOG_ERROR("ERROR: message contains duplicate values");
-            }
-            content[first] = second;
-        }
+        NS_LOG_ERROR("ERROR: bad message format - missing header");
+        return;
     }
-    NS_LOG_DEBUG("...message processed");
 
-    // if clock negative then terminate
-    // calculate the time_delta (if negative, error)
-    // schedule processing content at time_delta
-    // somewhere, cancel pending wait events
+    std::string header  = message.substr(0, index);
+    std::string data    = message.substr(index + strlen(SEPARATOR_HEADER));
+
+    index = header.find(" ");
+    if (index == std::string::npos)
+    {
+        NS_LOG_ERROR("ERROR: bad message format - invalid header");
+        return;
+    }
+
+    Time receivedTime;
+    try
+    {
+        std::string seconds = header.substr(0, index);      // int32 represented as string
+        std::string nanoseconds = header.substr(index + 1); // int32 represented as string
+        receivedTime = Seconds(std::stoi(seconds)) + NanoSeconds(std::stoi(nanoseconds));
+        NS_LOG_DEBUG("interpreted '" << seconds << " " << nanoseconds << "' as " << receivedTime);
+    }
+    catch (std::exception & e)
+    {
+        NS_LOG_ERROR("ERROR: bad message format - invalid timestamp");
+        return;
+    }
+
+    if (data.size() > strlen(SEPARATOR_MESSAGE))
+    {
+        data.erase(data.size() - strlen(SEPARATOR_MESSAGE));
+    }
+    else // data contains no content
+    {
+        data.clear();
+    }
+
+    if (m_waitEvent.IsPending()) // TODO: move
+    {
+        m_waitEvent.Cancel();
+    }
+
+    if (receivedTime.IsStrictlyNegative()) // terminate
+    {
+        NS_LOG_INFO("Received terminate: " << receivedTime);
+        // ??
+    }
+    else if (m_startTime.IsStrictlyNegative()) // initial condition
+    {
+        m_startTime = receivedTime;
+        NS_LOG_INFO("Initialized Start Time as " << m_startTime);
+        m_waitEvent = Simulator::ScheduleNow(&Gateway::WaitForNextUpdate, this);
+        Simulator::ScheduleNow(&Gateway::DoInitialize, this, data);
+    }
+    else
+    {
+        ns3::Time timeDelta = receivedTime - m_startTime; // TODO: check if negative
+        NS_LOG_INFO("advancing time from " << Simulator::Now() << " to " << Simulator::Now() + timeDelta);
+        Simulator::Schedule(timeDelta, &Gateway::DoUpdate, this, data);    
+    }
+}
+
+void
+Gateway::HandleUpdate(std::string data)
+{
+    NS_LOG_FUNCTION(this << data);
+
+    // TODO: skip wait if another event (stored in another time value) is pending
+    m_waitEvent = Simulator::ScheduleNow(&Gateway::WaitForNextUpdate, this);
+    DoUpdate(data);
+}
+
+void
+Gateway::SendData(const std::string & data)
+{
+    NS_LOG_FUNCTION(this << data);
+    send(m_clientSocket, data.c_str(), data.size(), 0); // check for errors
 }
 
 } // namespace ns3
