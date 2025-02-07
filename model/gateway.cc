@@ -208,9 +208,12 @@ Gateway::ReceiveNextMessage()
 
     char recvBuffer[BUFFER_SIZE];
 
-    std::string message = "";
+    std::string message = m_messageBuffer;
+    size_t separatorIndex;
 
-    do
+    m_messageBuffer.clear();
+
+    while ((separatorIndex = message.find(SEPARATOR_MESSAGE)) == std::string::npos)
     {
         int bytesReceived = recv(m_clientSocket, &recvBuffer[0], BUFFER_SIZE, 0);
 
@@ -229,26 +232,13 @@ Gateway::ReceiveNextMessage()
             return ""; // message not received
         }
     }
-    while(!StringEndsWith(message, SEPARATOR_MESSAGE));
 
+    m_messageBuffer = message.substr(separatorIndex + strlen(SEPARATOR_MESSAGE));
+    message.erase(separatorIndex + strlen(SEPARATOR_MESSAGE));
+        
     NS_LOG_INFO("gateway received the message: " << message);
 
     return message; // message received
-}
-
-bool
-Gateway::StringEndsWith(const std::string & str, const char * token)
-{
-    const size_t TOKEN_LENGTH = strlen(token);
-
-    if (str.size() >= TOKEN_LENGTH)
-    {
-        if (str.compare(str.size() - TOKEN_LENGTH, TOKEN_LENGTH, token) == 0)
-        {
-            return true;
-        }
-    }
-    return false;
 }
 
 void
@@ -307,6 +297,7 @@ Gateway::ForwardUp()
     {
         m_waitEvent.Cancel();
     }
+    NS_LOG_INFO("...update received");
 
     if (receivedTime.IsStrictlyNegative()) // terminate
     {
@@ -317,6 +308,7 @@ Gateway::ForwardUp()
     {
         m_startTime = receivedTime;
         NS_LOG_INFO("Initialized Start Time as " << m_startTime);
+        NS_LOG_INFO("waiting for next update...");
         m_waitEvent = Simulator::ScheduleNow(&Gateway::WaitForNextUpdate, this);
         Simulator::ScheduleNow(&Gateway::DoInitialize, this, data);
     }
@@ -324,7 +316,7 @@ Gateway::ForwardUp()
     {
         ns3::Time timeDelta = receivedTime - m_startTime; // TODO: check if negative
         NS_LOG_INFO("advancing time from " << Simulator::Now() << " to " << Simulator::Now() + timeDelta);
-        Simulator::Schedule(timeDelta, &Gateway::DoUpdate, this, data);    
+        Simulator::Schedule(timeDelta, &Gateway::HandleUpdate, this, data);    
     }
 }
 
@@ -334,6 +326,7 @@ Gateway::HandleUpdate(std::string data)
     NS_LOG_FUNCTION(this << data);
 
     // TODO: skip wait if another event (stored in another time value) is pending
+    NS_LOG_INFO("waiting for next update...");
     m_waitEvent = Simulator::ScheduleNow(&Gateway::WaitForNextUpdate, this);
     DoUpdate(data);
 }

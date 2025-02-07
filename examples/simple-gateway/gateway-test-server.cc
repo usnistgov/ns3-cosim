@@ -55,18 +55,26 @@ main(int argc, char* argv[])
     uint16_t positionDeltaX = 10;
     uint16_t serverPort     = 1111;
 
+    uint64_t iterations     = 30;
+    uint16_t numberOfNodes  = 3;
+
     CommandLine cmd(__FILE__);
     cmd.AddValue("logging", "Enable/disable detailed output logs (default=true)", enableLogging);
     cmd.AddValue("timeStart", "Starting simulation time in seconds", timeStart);
     cmd.AddValue("timeDelta", "Step size of simulation time in seconds", timeDelta);
     cmd.AddValue("positionDeltaX", "Maximum increase per time step to the x-coordinate of each node", positionDeltaX);
     cmd.AddValue("serverPort", "Port number for the UDP Server", serverPort);
+    cmd.AddValue("iterations", "Number of time steps to simulate", iterations);
+    cmd.AddValue("numberOfNodes", "Number of vehicle nodes to simulate", numberOfNodes);
     cmd.Parse(argc, argv);
 
     if (enableLogging)
     {
         LogComponentEnable("SimpleGatewayServer", LOG_LEVEL_ALL);
     }
+    NS_LOG_INFO("started");
+
+    std::srand(std::time(NULL));
 
     int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
     if (serverSocket == -1)
@@ -106,120 +114,60 @@ main(int argc, char* argv[])
         NS_LOG_ERROR("Failed to accept connection");
         return 1;
     }
+    NS_LOG_INFO("client connected");
     
-    std::string message = std::to_string(timeStart) + " 0\r\n\r\n";
+    std::vector<uint16_t> xPosition(numberOfNodes, 0);
+    std::string message = std::to_string(timeStart) + " 0\r\n";
+    for (uint16_t i = 0; i < numberOfNodes; i++)
+    {
+        message += std::to_string(xPosition[i]) + " " + std::to_string(i) + " 0 0\r\n"; // x y z signal
+    }
+    message += "\r\n";
+    
     if (send(clientSocket, message.c_str(), message.size(), 0) == -1)
     {
         NS_LOG_ERROR("Failed to send message");
     }
+    NS_LOG_INFO("sent message " << 0);
 
     const size_t BUFFER_SIZE = 4096;
     char buffer[BUFFER_SIZE];
 
-    int bytesReceived = recv(clientSocket, buffer, BUFFER_SIZE, 0);
-    if (bytesReceived == -1)
+    for (uint64_t i = 1; i < iterations; i++)
     {
-        // error
-    }
+        message = std::to_string(timeStart + timeDelta * i) + " 0\r\n";
+        for (uint16_t n = 0; n < numberOfNodes; n++)
+        {
+            xPosition[n] += std::rand() % positionDeltaX + 1;
 
-    int numberOfNodes = std::atoi(buffer); // check errors
-    NS_LOG_INFO("Configured to send data for " << numberOfNodes << " nodes");
+            int transmit = 0;
+            if (i % 5 == 0)
+            {
+                transmit = std::rand() % 2;
+            }
 
-/*
-    // Send numbers to the client
-    double carAPosX = 20;
-    double carAAccelX = 0;
-    double carBPosX = 40;
-    double carBAccelX = 0;
-    double carCPosX = 60; 
-    double carCAccelX = 0; 
-    double braking = 0;
-    int relativeTime = 0;
-    int timeInterval = 1;
-    //Condition will be a random number between 5 and 10
-    int RandomBrakingCondition = rand() % 5 + 5;
+            message += std::to_string(xPosition[n]) + " " + std::to_string(n) + " 0 " + std::to_string(transmit) + "\r\n";
+        }
+        message += "\r\n";
     
-
-    for(int i = 0; i<5; ++i)   { // 15 second simulation
-        if (i > 0) { // can't get a response until the 1st message is sent
-            char incomingBuffer[1024];
-            cout << "Waiting for data from client..." << endl;
-                
-            int bytesReceived = recv(clientSocket, incomingBuffer, sizeof(incomingBuffer), 0);
-            if (bytesReceived == -1) {
-                cerr << "Failed to read data from socket." << endl;
-                break;
-            }
-            if (bytesReceived == 0) {
-                cout << "No more data" << endl;
-                break;
-            }
-            
-            cout << "Recieved: " << string(incomingBuffer, 0, bytesReceived) << endl;
-            
-            //make incomingBuffer a string vector seperated by commas and parse it
-            string substr = string(incomingBuffer, 0, bytesReceived);
-            std::stringstream s_stream(substr);
-            vector<double> tempState;
-            while(s_stream.good())  { 
-                std::string substr;
-                getline(s_stream,substr,',');
-                tempState.push_back(static_cast<double>(atof(substr.c_str())));
-            }
-
-
-            if(tempState[2] == 1)    {   //keep looping until client sends 1
-                carBAccelX = -1;
-                cout << "carB will begin to brake" << endl;
-            }
-            else    {
-                carBAccelX = 0;
-            }
-            if(tempState[0] == 1)    {   //keep looping until client sends 1
-                carCAccelX = -1;
-                cout << "carC will begin to brake" << endl;
-            }      
-            else    {
-                carCAccelX = 0;
-            }    
-
+        if (send(clientSocket, message.c_str(), message.size(), 0) == -1)
+        {
+            NS_LOG_ERROR("Failed to send message");
         }
+        NS_LOG_INFO("sent message " << i);
 
-        //Generate a random value between 1 and 10 
-        carAPosX += rand() % 10 + 1;
-        carBPosX += rand() % 10 + 1;
-        carCPosX += rand() % 10 + 1;
-
-        //check if arbitrary conditions are met for braking to be true
-        if(i == RandomBrakingCondition) {
-            carAAccelX  = -1;
+        int bytesReceived = recv(clientSocket, buffer, BUFFER_SIZE, 0);
+        if (bytesReceived == -1)
+        {
+            NS_LOG_INFO("received response");
         }
-
-        // Convert the number to string
-        string numberString = to_string(relativeTime) + " 0\r\n" + to_string(carAPosX) +  " " + to_string(carAAccelX) +  "," + to_string(carBPosX) + "," + to_string(carBAccelX) +  "," + to_string(carCPosX) + ","  + to_string(carCAccelX);
-
-        // Append newline character
-        numberString += "\r\n\r\n";
-
-        // Send message to the client
-        if (send(clientSocket, numberString.c_str(), numberString.size(), 0) == -1) {
-            cerr << "Failed to send data." << endl;
-            break;
-        }
-        cout << "#" << i << ": " << numberString << endl;
-
-
-        relativeTime += timeInterval;
     }
 
-    string TerminationMSG = "-1\n";
-    if (send(clientSocket, TerminationMSG.c_str(), TerminationMSG.size(), 0) == -1) {
-            cerr << "Failed to send data." << endl;
+    message = "-1 0\r\n\r\n";
+    if (send(clientSocket, message.c_str(), message.size(), 0) == -1)
+    {
+        NS_LOG_ERROR("Failed to send message");
     }
-    cout << "Termination Message Sent: " << TerminationMSG << endl;
-
-    shutdown(clientSocket, SHUT_RDWR);
-*/
 
     close(clientSocket);
     close(serverSocket);

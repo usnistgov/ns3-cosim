@@ -91,7 +91,6 @@ class Gateway
         void WaitForNextUpdate();
 
         std::string ReceiveNextMessage();
-        bool StringEndsWith(const std::string & str, const char * token);
 
         void HandleUpdate(std::string data);
 
@@ -106,6 +105,7 @@ class Gateway
         std::mutex m_messageQueueMutex;
         EventId m_destroyEvent;
         EventId m_waitEvent;
+        std::string m_messageBuffer;
 
         Time m_startTime;
         Time m_receivedTime;

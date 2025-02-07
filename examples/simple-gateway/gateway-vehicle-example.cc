@@ -69,21 +69,6 @@ ReportMobility(Ptr<const MobilityModel> mobility)
         << ", Velocity " << mobility->GetVelocity());
 }
 
-void
-DoNothing()
-{
-    NS_LOG_INFO("nothing is done");
-}
-
-void
-StringWeirdness(std::string hahah)
-{
-    std::string newValue(hahah);
-    newValue.append("a");
-    NS_LOG_INFO(hahah);
-    Simulator::Schedule(Seconds(1), &StringWeirdness, newValue);
-}
-
 // TODO:
 //  wait for server to exist / attempt to re-connect
 //  move the time sync stuff into base gateway (as 1st row of data)
@@ -98,13 +83,13 @@ void
 GatewayImplementation::DoInitialize(const std::string & data)
 {
     NS_LOG_INFO("Received data: " << data);
-    SendData("3"); // number of nodes
 }
 
 void
 GatewayImplementation::DoUpdate(const std::string & data)
 {
     NS_LOG_INFO(data);
+    SendData("\r\n\r\n");
 }
 
 int
@@ -171,7 +156,7 @@ main(int argc, char* argv[])
         ApplicationContainer serverApps = serverHelper.Install(vehicle);
         serverApps.Get(0)->TraceConnect("Rx", addressStream.str(), MakeCallback(&PacketSinkTrace));
         serverApps.Start(timeStart);
-        serverApps.Stop(timeStop);
+        //serverApps.Stop(timeStop);
 
         TriggeredSendHelper clientHelper ("ns3::UdpSocketFactory", InetSocketAddress(broadcastAddress, port));
         clientHelper.SetAttribute("PacketSize", UintegerValue(1024));
@@ -179,7 +164,7 @@ main(int argc, char* argv[])
 
         ApplicationContainer clientApps = clientHelper.Install(vehicle);
         clientApps.Start(timeStart);
-        clientApps.Stop(timeStop);
+        //clientApps.Stop(timeStop);
     }
 
     const std::string gatewayAddress = "127.0.0.1";
@@ -188,12 +173,7 @@ main(int argc, char* argv[])
     GatewayImplementation gateway;
     gateway.Connect(gatewayAddress, gatewayPort); // server must be running before this line (or error)
 
-    Simulator::Schedule(Seconds(10), &DoNothing);
-
-    Simulator::Schedule(Seconds(1), &StringWeirdness, "1");
-    Simulator::Schedule(Seconds(1.5), &StringWeirdness, "1.5");
-
-    Simulator::Stop(timeStop);
+    //Simulator::Stop(timeStop);
     Simulator::Run();
     Simulator::Destroy();
 
