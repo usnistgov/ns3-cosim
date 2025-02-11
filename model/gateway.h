@@ -49,6 +49,7 @@
 #include <fstream>
 #include <iostream>
 #include <queue>
+#include <vector>
 
 #include <string>
 
@@ -60,27 +61,19 @@ class Gateway
     public:
         Gateway();
 
-        void Connect(const std::string & serverAddress, int serverPort);
-    protected:
-        void SendData(const std::string & data);
-    private:
-        static const char * SEPARATOR_HEADER;
-        static const char * SEPARATOR_MESSAGE;
-        static const size_t BUFFER_SIZE = 4096;
+        void Connect(const std::string & serverAddress, int serverPort, size_t dataSize);
 
+        void SetValue(size_t index, std::string value);
+    protected:
+        void SetDelimiter(const std::string & delimiter);
+
+        void SetMessageEnd(const std::string & endToken);
+    private:
         enum STATE
         {
             CREATED,
             CONNECTED,
-            STOPPING,
-            STOPPED,
-            ERROR
-        };
-
-        struct ClockValue
-        {
-            int64x64_t seconds;
-            int64x64_t nanoseconds;
+            STOPPING
         };
 
         bool CreateSocketConnection(const std::string & serverAddress, int serverPort);
@@ -89,13 +82,15 @@ class Gateway
         void StopThread();
         void ForwardUp();
         void WaitForNextUpdate();
+        void SendResponse();
 
         std::string ReceiveNextMessage();
+        
+        void HandleInitialize(std::vector<std::string> data);
+        virtual void DoInitialize(const std::vector<std::string> & data) = 0;
 
-        void HandleUpdate(std::string data);
-
-        virtual void DoInitialize(const std::string & data) = 0;
-        virtual void DoUpdate(const std::string & data) = 0;
+        void HandleUpdate(std::vector<std::string> data);
+        virtual void DoUpdate(const std::vector<std::string> & data) = 0;
 
         STATE m_state;
         uint32_t m_nodeId;
@@ -106,9 +101,13 @@ class Gateway
         EventId m_destroyEvent;
         EventId m_waitEvent;
         std::string m_messageBuffer;
+        std::string m_messageDelimiter;
+        std::string m_messageEndToken;
 
-        Time m_startTime;
-        Time m_receivedTime;
+        Time m_timeStart;
+        Time m_timePause;
+
+        std::vector<std::string> m_data;
 };
 
 } // namespace ns3

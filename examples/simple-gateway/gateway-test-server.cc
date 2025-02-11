@@ -117,10 +117,10 @@ main(int argc, char* argv[])
     NS_LOG_INFO("client connected");
     
     std::vector<uint16_t> xPosition(numberOfNodes, 0);
-    std::string message = std::to_string(timeStart) + " 0\r\n";
+    std::string message = std::to_string(timeStart) + " 0";
     for (uint16_t i = 0; i < numberOfNodes; i++)
     {
-        message += std::to_string(xPosition[i]) + " " + std::to_string(i) + " 0 0\r\n"; // x y z signal
+        message += " " + std::to_string(xPosition[i]) + " " + std::to_string(i) + " 0 0"; // x y z signal
     }
     message += "\r\n";
     
@@ -135,7 +135,7 @@ main(int argc, char* argv[])
 
     for (uint64_t i = 1; i < iterations; i++)
     {
-        message = std::to_string(timeStart + timeDelta * i) + " 0\r\n";
+        message = std::to_string(timeStart + timeDelta * i) + " 0";
         for (uint16_t n = 0; n < numberOfNodes; n++)
         {
             xPosition[n] += std::rand() % positionDeltaX + 1;
@@ -146,7 +146,7 @@ main(int argc, char* argv[])
                 transmit = std::rand() % 2;
             }
 
-            message += std::to_string(xPosition[n]) + " " + std::to_string(n) + " 0 " + std::to_string(transmit) + "\r\n";
+            message += " " + std::to_string(xPosition[n]) + " " + std::to_string(n) + " 0 " + std::to_string(transmit);
         }
         message += "\r\n";
     
@@ -159,7 +159,12 @@ main(int argc, char* argv[])
         int bytesReceived = recv(clientSocket, buffer, BUFFER_SIZE, 0);
         if (bytesReceived == -1)
         {
-            NS_LOG_INFO("received response");
+            NS_LOG_ERROR("received bad response");
+        }
+        else if(bytesReceived >= 2)
+        {
+            buffer[bytesReceived - 2] = '\0';
+            NS_LOG_INFO("received " << buffer);
         }
     }
 

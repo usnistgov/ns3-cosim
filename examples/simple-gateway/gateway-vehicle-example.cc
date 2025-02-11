@@ -58,6 +58,7 @@ void
 PacketSinkTrace(std::string sinkAddress, Ptr<const Packet> packet, const Address &clientAddress)
 {
     NS_LOG_INFO("Sink " << sinkAddress << " received packet at t=" << Simulator::Now().As(Time::S));
+    // update receive count for this trace id
 }
 
 void
@@ -71,25 +72,27 @@ ReportMobility(Ptr<const MobilityModel> mobility)
 
 // TODO:
 //  wait for server to exist / attempt to re-connect
-//  move the time sync stuff into base gateway (as 1st row of data)
-//  improve send method
 class GatewayImplementation : public Gateway
 {
-    virtual void DoInitialize(const std::string & data);
-    virtual void DoUpdate(const std::string & data);
+    virtual void DoInitialize(const std::vector<std::string> & data);
+    virtual void DoUpdate(const std::vector<std::string> & data);
 };   
 
 void
-GatewayImplementation::DoInitialize(const std::string & data)
+GatewayImplementation::DoInitialize(const std::vector<std::string> & data)
 {
-    NS_LOG_INFO("Received data: " << data);
+    // set initial positions
+    for (size_t i = 0; i < 3; i++)
+    {
+        SetValue(i, "0"); // receive count = 0
+    }
 }
 
 void
-GatewayImplementation::DoUpdate(const std::string & data)
+GatewayImplementation::DoUpdate(const std::vector<std::string> & data)
 {
-    NS_LOG_INFO(data);
-    SendData("\r\n\r\n");
+    // update positions
+    // broadcast as required
 }
 
 int
@@ -171,7 +174,7 @@ main(int argc, char* argv[])
     const uint16_t gatewayPort = 1111;
 
     GatewayImplementation gateway;
-    gateway.Connect(gatewayAddress, gatewayPort); // server must be running before this line (or error)
+    gateway.Connect(gatewayAddress, gatewayPort, 3); // server must be running before this line (or error)
 
     //Simulator::Stop(timeStop);
     Simulator::Run();
