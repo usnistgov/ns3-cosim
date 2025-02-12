@@ -32,99 +32,115 @@
  *  Benjamin Philipose
 */
 
+#include <arpa/inet.h>
+#include <sys/socket.h>
+
+#include "ns3/log.h"
+#include "ns3/simulator.h"
+
+#include "gateway.h"
+
+
+
+
 #include "ns3/applications-module.h"
 
-#include <arpa/inet.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/socket.h>
 #include <unistd.h>
 #include <cstdlib>
 
 #include <iostream>
 
 #include "ns3/node.h"
-#include "ns3/simulator.h"
-#include "ns3/log.h"
-
-#include "gateway.h"
 
 namespace ns3
 {
 
 NS_LOG_COMPONENT_DEFINE("Gateway");
 
-Gateway::Gateway():
+Gateway::Gateway(uint32_t dataSize, const std::string & delimiterField, const std::string & delimiterMessage):
+    m_eventWait(),
+    m_eventDestroy(),
     m_timeStart(Seconds(-1)),
     m_timePause(Seconds(0)),
-    m_messageEndToken("\r\n"),
-    m_messageDelimiter(" "),
-    m_destroyEvent()
+    m_delimiterField(delimiterField),
+    m_delimiterMessage(delimiterMessage),
+    m_data(dataSize, "")
 {
-    NS_LOG_FUNCTION(this);
+    NS_LOG_FUNCTION(this << dataSize);
 
-    m_nodeId = Simulator::GetContext();
-    m_state = STATE::CREATED;
+    if (delimiterField.empty())
+    {
+        NS_FATAL_ERROR("ERROR: gateway field delimiter cannot be empty");
+    }
+    if (delimiterMessage.empty())
+    {
+        NS_FATAL_ERROR("ERROR: gateway message delimiter cannot be empty");
+    }
+    if (delimiterField == delimiterMessage)
+    {
+        NS_FATAL_ERROR("ERROR: gateway message and field delimiters must have different values");
+    }
+
+    m_context = Simulator::GetContext();
+    m_state   = STATE::CREATED;
 }
 
 void
-Gateway::Connect(const std::string & serverAddress, int serverPort, size_t dataSize)
+Gateway::Connect(const std::string & serverAddress, uint16_t serverPort)
 {
     NS_LOG_FUNCTION(this << serverAddress << serverPort);
 
     if (m_state != STATE::CREATED) // prevent duplicate calls
     {
-        NS_LOG_ERROR("ERROR: failed to connect the gateway to "
-            << serverAddress << ":" << serverPort
-            << " due to a previous connection attempt"
-        );
-        return;
+        NS_FATAL_ERROR("ERROR: Gateway::Connect was called multiple times");
     }
 
-    m_data.resize(dataSize + 2); // + header size
-
-    if (CreateSocketConnection(serverAddress, serverPort))
+    // create the client socket
+    m_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (m_socket < 0)
     {
-        m_state = STATE::CONNECTED; // set before RunThread
-        NS_LOG_INFO("Connected the gateway to "
-            << serverAddress << ":" << serverPort
-        );
-
-        // schedule a function to stop the socket thread when ns-3 ends
-        m_destroyEvent = Simulator::ScheduleDestroy(&Gateway::StopThread, this);
-
-        // start a thread to handle the socket connection
-        m_thread = std::thread(&Gateway::RunThread, this);
-
-        // start time management
-        NS_LOG_INFO("waiting for next update...");
-        m_waitEvent = Simulator::ScheduleNow(&Gateway::WaitForNextUpdate, this);
+        NS_FATAL_ERROR("ERROR: Gateway::Connect failed to create a socket");
     }
+
+    // set the server address
+    struct sockaddr_in socketAddress;
+    socketAddress.sin_family = AF_INET;
+    socketAddress.sin_port = htons(serverPort);
+    if (inet_pton(AF_INET, serverAddress.c_str(), &socketAddress.sin_addr) <= 0)
+    {
+        NS_FATAL_ERROR("ERROR: Gateway::Connect failed to resolve the address " << serverAddress);
+    }
+
+    // connect to the server
+    if (connect(m_socket, (struct sockaddr *)&socketAddress, sizeof(socketAddress)) < 0)
+    {
+        NS_FATAL_ERROR("ERROR: Gateway::Connect failed to connect to "
+            << serverAddress << ":" << serverPort << " (check if the server is running)"
+        );
+    }
+
+    m_state = STATE::CONNECTED; // this must be set before RunThread
+    NS_LOG_INFO("Gateway connected to " << serverAddress << ":" << serverPort);
+
+    // schedule a function to stop the socket thread when ns-3 ends
+    m_eventDestroy = Simulator::ScheduleDestroy(&Gateway::StopThread, this);
+
+    // start a thread to handle the socket connection
+    m_thread = std::thread(&Gateway::RunThread, this);
+
+    // wait until the thread forwards the next received message
+    NS_LOG_DEBUG("waiting for next update...");
+    m_eventWait = Simulator::ScheduleNow(&Gateway::WaitForNextUpdate, this);
 }
 
-void
-Gateway::WaitForNextUpdate()
-{
-    // pause ns-3 time progression until this event is cancelled
-    m_waitEvent = Simulator::ScheduleNow(&Gateway::WaitForNextUpdate, this);
-}
+
+
+
 
 void
-Gateway::SetDelimiter(const std::string & delimiter)
-{
-    NS_LOG_FUNCTION(this);
-    m_messageDelimiter = delimiter;
-}
-
-void
-Gateway::SetMessageEnd(const std::string & endToken)
-{
-    NS_LOG_FUNCTION(this);
-    m_messageEndToken = endToken;
-}
-
-void
-Gateway::SetValue(size_t index, std::string value)
+Gateway::SetValue(uint32_t index, const std::string & value)
 {
     NS_LOG_FUNCTION(this << index << value);
 
@@ -139,40 +155,11 @@ Gateway::SetValue(size_t index, std::string value)
     }
 }
 
-bool
-Gateway::CreateSocketConnection(const std::string & serverAddress, int serverPort)
+void
+Gateway::WaitForNextUpdate()
 {
-    NS_LOG_FUNCTION(this << serverAddress << serverPort);
-
-    // create the client socket
-    m_clientSocket = socket(AF_INET, SOCK_STREAM, 0);
-    if (m_clientSocket < 0)
-    {
-        NS_LOG_ERROR("ERROR: failed to create socket");
-        return false;
-    }
-
-    // set the server address
-    struct sockaddr_in socketAddress;
-    socketAddress.sin_family = AF_INET;
-    socketAddress.sin_port = htons(serverPort);
-    if (inet_pton(AF_INET, serverAddress.c_str(), &socketAddress.sin_addr) <= 0)
-    {
-        NS_LOG_ERROR("ERROR: failed to resolve the address " << serverAddress);
-        return false;
-    }
-
-    // connect to the server
-    if (connect(m_clientSocket, (struct sockaddr *)&socketAddress, sizeof(socketAddress)) < 0)
-    {
-        NS_LOG_ERROR("ERROR: failed to connect to "
-            << serverAddress << ":" << serverPort
-            << " (check if the server is online)"
-        );
-        return false;
-    }
-
-    return true;
+    // pause ns-3 time progression until this event is cancelled
+    m_eventWait = Simulator::ScheduleNow(&Gateway::WaitForNextUpdate, this);
 }
 
 void
@@ -191,16 +178,16 @@ Gateway::StopThread()
             NS_LOG_INFO("...gateway thread stopped.");
         }
 
-        close(m_clientSocket);
+        close(m_socket);
     }
     else
     {
         NS_LOG_LOGIC("Gateway::StopThread skipped - the gateway is not connected");
     }
 
-    if (m_waitEvent.IsPending())
+    if (m_eventWait.IsPending())
     {
-        m_waitEvent.Cancel();
+        m_eventWait.Cancel();
         NS_LOG_INFO("Cancelled a pending WaitForNextUpdate");
     }
 }
@@ -215,12 +202,12 @@ Gateway::RunThread()
         std::string message = ReceiveNextMessage();
 
         // the RunThread needs the main thread to execute a function (either StopThread or ForwardUp)
-        // it schedules the function for this time step on behalf of the main thread's m_nodeId
+        // it schedules the function for this time step on behalf of the main thread's m_context
         // then, Simulator::Run from the main thread will process the scheduled function
         if (message.empty()) // TODO: test whether this works as intended
         {
             NS_LOG_ERROR("Stopping the gateway thread due to a receive error");
-            Simulator::ScheduleWithContext(m_nodeId, Time(0), MakeEvent(&Gateway::StopThread, this));
+            Simulator::ScheduleWithContext(m_context, Time(0), MakeEvent(&Gateway::StopThread, this));
             break; // prevent additional receive attempts
         }
         else
@@ -228,7 +215,7 @@ Gateway::RunThread()
             std::unique_lock lock(m_messageQueueMutex);
             NS_LOG_LOGIC("Pushing a new message to the gateway message queue");
             m_messageQueue.push(message);
-            Simulator::ScheduleWithContext(m_nodeId, Time(0), MakeEvent(&Gateway::ForwardUp, this));
+            Simulator::ScheduleWithContext(m_context, Time(0), MakeEvent(&Gateway::ForwardUp, this));
         }   // critical section end
     }
 }
@@ -246,9 +233,9 @@ Gateway::ReceiveNextMessage()
 
     m_messageBuffer.clear();
 
-    while ((separatorIndex = message.find(m_messageEndToken)) == std::string::npos)
+    while ((separatorIndex = message.find(m_delimiterMessage)) == std::string::npos)
     {
-        int bytesReceived = recv(m_clientSocket, &recvBuffer[0], BUFFER_SIZE, 0);
+        int bytesReceived = recv(m_socket, &recvBuffer[0], BUFFER_SIZE, 0);
 
         if (bytesReceived > 0)
         {
@@ -266,7 +253,7 @@ Gateway::ReceiveNextMessage()
         }
     }
 
-    m_messageBuffer = message.substr(separatorIndex + m_messageEndToken.size());
+    m_messageBuffer = message.substr(separatorIndex + m_delimiterMessage.size());
     message.erase(separatorIndex);
         
     NS_LOG_INFO("gateway received the message: " << message);
@@ -289,10 +276,10 @@ Gateway::ForwardUp()
     std::vector<std::string> receivedData;
 
     size_t index;
-    while ((index = message.find(m_messageDelimiter)) != std::string::npos)
+    while ((index = message.find(m_delimiterField)) != std::string::npos)
     {
         receivedData.push_back(message.substr(0, index));
-        message.erase(0, index + m_messageDelimiter.size());
+        message.erase(0, index + m_delimiterField.size());
     }
     receivedData.push_back(message);
 
@@ -329,9 +316,9 @@ Gateway::ForwardUp()
     }
     else
     {
-        if (m_waitEvent.IsPending()) // TODO: move
+        if (m_eventWait.IsPending()) // TODO: move
         {
-            m_waitEvent.Cancel();
+            m_eventWait.Cancel();
         }
         NS_LOG_INFO("...update received for " << receivedTime);
 
@@ -353,7 +340,7 @@ Gateway::HandleUpdate(std::vector<std::string> data)
     if (Simulator::Now() == m_timePause)
     {
         NS_LOG_INFO("waiting for next update...");
-        m_waitEvent = Simulator::ScheduleNow(&Gateway::WaitForNextUpdate, this);
+        m_eventWait = Simulator::ScheduleNow(&Gateway::WaitForNextUpdate, this);
     }
 }
 
@@ -375,13 +362,13 @@ Gateway::SendResponse() // TODO: add time stamp
     {
         if (i != 0)
         {
-            message += m_messageDelimiter;
+            message += m_delimiterField;
         }
         message += m_data[i];
     }
-    message += m_messageEndToken;
+    message += m_delimiterMessage;
 
-    send(m_clientSocket, message.c_str(), message.size(), 0); // check for errors
+    send(m_socket, message.c_str(), message.size(), 0); // check for errors
 }
 
 } // namespace ns3

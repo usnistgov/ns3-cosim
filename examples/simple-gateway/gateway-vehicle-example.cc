@@ -66,6 +66,7 @@ class GatewayImplementation : public Gateway
 };
 
 GatewayImplementation::GatewayImplementation(NodeContainer vehicles):
+    Gateway(vehicles.GetN()),
     m_vehicles(vehicles),
     m_count(vehicles.GetN(), 0)
 {
@@ -216,7 +217,7 @@ main(int argc, char* argv[])
         //clientApps.Stop(timeStop);
     }
 
-    gateway.Connect(gatewayAddress, gatewayPort, vehicles.GetN()); // server must be running before this line (or error)
+    gateway.Connect(gatewayAddress, gatewayPort); // server must be running before this line (or error)
 
     //Simulator::Stop(timeStop);
     Simulator::Run();

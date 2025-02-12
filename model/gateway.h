@@ -35,23 +35,14 @@
 #ifndef GATEWAY_H
 #define GATEWAY_H
 
-#include <arpa/inet.h>
-#include <stdio.h>
-#include <string.h>
-#include <sys/socket.h>
-#include <unistd.h>
-#include <cstdlib>
-#include <iostream>
-#include <sstream>
-
-#include <thread>
 #include <mutex>
-#include <fstream>
-#include <iostream>
 #include <queue>
+#include <string>
+#include <thread>
 #include <vector>
 
-#include <string>
+#include "ns3/event-id.h"
+#include "ns3/nstime.h"
 
 namespace ns3
 {
@@ -59,15 +50,39 @@ namespace ns3
 class Gateway
 {
     public:
-        Gateway();
+        /**
+         * @brief Construct a new gateway instance.
+         *
+         * @param dataSize the number of elements the gateway sends to its server
+         * @param delimiterField the delimiter used between values within one message (default: " ")
+         * @param delimiterMessage the delimiter used to indicate the end of a message (default: "\r\n")
+         */
+        Gateway(uint32_t dataSize,
+                const std::string & delimiterField = " ",
+                const std::string & delimiterMessage = "\r\n");
+        
+        /**
+         * @brief Connects the gateway to the server specified as arguments.
+         *
+         * Once connected, the remote server (through the gateway) will control time progression of the ns-3 simulator.
+         * The gateway will continuously schedule an event for the current time (effectively, pausing time) until it
+         * receives an explicit request from the remote server to advance. This function only attempts to connect to
+         * the server once, so the remote server must be running before calling this function.
+         *
+         * Side Effects:
+         *  1) this function will create a UDP socket connected to the remote server.
+         *  2) this function will create a second thread to handle messages received from the remote server.
+         *
+         * Exceptions:
+         *  1) this function can only be called once; a second call will cause a fatal error.
+         *  2) an invalid or unresolved address will cause a fatal error. 
+         *
+         * @param serverAddress the IPv4 or IPv6 address of the remote server
+         * @param serverPort the port number of the remote server
+         */
+        void Connect(const std::string & serverAddress, uint16_t serverPort);
 
-        void Connect(const std::string & serverAddress, int serverPort, size_t dataSize);
-
-        void SetValue(size_t index, std::string value);
-    protected:
-        void SetDelimiter(const std::string & delimiter);
-
-        void SetMessageEnd(const std::string & endToken);
+        void SetValue(uint32_t dataIndex, const std::string & value);
     private:
         enum STATE
         {
@@ -75,8 +90,6 @@ class Gateway
             CONNECTED,
             STOPPING
         };
-
-        bool CreateSocketConnection(const std::string & serverAddress, int serverPort);
 
         void RunThread();
         void StopThread();
@@ -86,28 +99,34 @@ class Gateway
 
         std::string ReceiveNextMessage();
         
-        void HandleInitialize(std::vector<std::string> data);
-        virtual void DoInitialize(const std::vector<std::string> & data) = 0;
+        void HandleInitialize(std::vector<std::string> receivedData);
+        virtual void DoInitialize(const std::vector<std::string> & receivedData) = 0;
 
-        void HandleUpdate(std::vector<std::string> data);
-        virtual void DoUpdate(const std::vector<std::string> & data) = 0;
+        void HandleUpdate(std::vector<std::string> receivedData);
+        virtual void DoUpdate(const std::vector<std::string> & receivedData) = 0;
 
-        STATE m_state;
-        uint32_t m_nodeId;
-        int m_clientSocket;
-        std::thread m_thread;
-        std::queue<std::string> m_messageQueue;
-        std::mutex m_messageQueueMutex;
-        EventId m_destroyEvent;
-        EventId m_waitEvent;
-        std::string m_messageBuffer;
-        std::string m_messageDelimiter;
-        std::string m_messageEndToken;
+        uint32_t m_context;     //!< Simulator context when the gateway instance was created
+        
+        EventId m_eventWait;    //!< If IsPending, an event to call Gateway::WaitForNextUpdate in an infinite loop
+        EventId m_eventDestroy; //!< If IsPending, an event to call Gateway::StopThread when the simulator stops
 
-        Time m_timeStart;
-        Time m_timePause;
+        STATE m_state;          //!< Current state of the gateway instance
 
-        std::vector<std::string> m_data;
+        Time m_timeStart;       //!< Initial timestamp received from the server specified by Gateway::Connect
+        Time m_timePause;       //!< Time at which Gateway::WaitForNextUpdate will pause ns-3 time progression
+
+        int m_socket;           //!< Client UDP socket connection to the server specified by Gateway::Connect
+
+        std::thread m_thread;   //!< Thread that receives messages from the client UDP socket connection
+
+        std::queue<std::string> m_messageQueue; //!< Shared memory between the main thread and the read thread
+        std::mutex m_messageQueueMutex;         //!< Mutex lock used to synchronize access to the shared memory
+        
+        std::string m_delimiterField;           //!< The character sequence that separates values within a message
+        std::string m_delimiterMessage;         //!< The character sequence that indicates the end of a message
+        std::string m_messageBuffer;            //!< A buffer for any data received after the message delimiter
+        
+        std::vector<std::string> m_data;        //!< The values that will be sent to the server next update
 };
 
 } // namespace ns3
