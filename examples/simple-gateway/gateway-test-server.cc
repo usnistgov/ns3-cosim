@@ -128,10 +128,21 @@ main(int argc, char* argv[])
     {
         NS_LOG_ERROR("Failed to send message");
     }
-    NS_LOG_INFO("sent message " << 0);
+    NS_LOG_INFO("sent message " << message);
 
     const size_t BUFFER_SIZE = 4096;
     char buffer[BUFFER_SIZE];
+
+    int bytesReceived = recv(clientSocket, buffer, BUFFER_SIZE, 0);
+    if (bytesReceived == -1)
+    {
+        NS_LOG_ERROR("received bad response");
+    }
+    else if(bytesReceived >= 2)
+    {
+        buffer[bytesReceived - 2] = '\0';
+        NS_LOG_INFO("received " << buffer);
+    }
 
     for (uint64_t i = 1; i < iterations; i++)
     {
@@ -154,7 +165,7 @@ main(int argc, char* argv[])
         {
             NS_LOG_ERROR("Failed to send message");
         }
-        NS_LOG_INFO("sent message " << i);
+        NS_LOG_INFO("sent message " << message);
 
         int bytesReceived = recv(clientSocket, buffer, BUFFER_SIZE, 0);
         if (bytesReceived == -1)
@@ -168,7 +179,7 @@ main(int argc, char* argv[])
         }
     }
 
-    message = "-1 0\r\n\r\n";
+    message = "-1 0\r\n";
     if (send(clientSocket, message.c_str(), message.size(), 0) == -1)
     {
         NS_LOG_ERROR("Failed to send message");

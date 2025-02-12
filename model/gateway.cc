@@ -335,8 +335,8 @@ Gateway::ForwardUp()
         }
         NS_LOG_INFO("...update received for " << receivedTime);
 
-        ns3::Time timeDelta = receivedTime - m_timeStart; // TODO: check if negative
-        m_timePause = Simulator::Now() + timeDelta;
+        m_timePause = receivedTime - m_timeStart; // TODO: check if negative
+        ns3::Time timeDelta = m_timePause - Simulator::Now();
         NS_LOG_INFO("advancing time from " << Simulator::Now() << " to " << m_timePause);
         Simulator::Schedule(timeDelta, &Gateway::HandleUpdate, this, receivedData);
     }

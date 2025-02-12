@@ -48,17 +48,83 @@ using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("GatewayVehicleExample");
 
-void
-Transmit(Ptr<Application> sendingApplication)
+// TODO:
+//  wait for server to exist / attempt to re-connect
+class GatewayImplementation : public Gateway
 {
-    DynamicCast<TriggeredSendApplication>(sendingApplication)->Send(1); // send 1 packet
+    public:
+        GatewayImplementation(NodeContainer vehicles);
+
+        void HandleReceive(std::string id, Ptr<const Packet> packet, const Address &clientAddress);
+    private:
+        virtual void DoInitialize(const std::vector<std::string> & data);
+        virtual void DoUpdate(const std::vector<std::string> & data);
+        void Update(const std::vector<std::string> & data);
+
+        NodeContainer m_vehicles;
+        std::vector<uint32_t> m_count;
+};
+
+GatewayImplementation::GatewayImplementation(NodeContainer vehicles):
+    m_vehicles(vehicles),
+    m_count(vehicles.GetN(), 0)
+{
+    // do nothing
 }
 
 void
-PacketSinkTrace(std::string sinkAddress, Ptr<const Packet> packet, const Address &clientAddress)
+GatewayImplementation::HandleReceive(std::string id, Ptr<const Packet> packet, const Address &clientAddress)
 {
-    NS_LOG_INFO("Sink " << sinkAddress << " received packet at t=" << Simulator::Now().As(Time::S));
-    // update receive count for this trace id
+    NS_LOG_INFO("\tmessage received by " << id << " at " << Simulator::Now().As(Time::S));
+
+    size_t vehicleId = std::stoi(id);
+
+    if (vehicleId <= m_count.size())
+    {
+        m_count[vehicleId] += 1;
+    }
+    else
+    {
+        NS_LOG_ERROR("ERROR: HandleReceive called with index " << vehicleId << " > " << m_count.size());
+    }
+}
+
+void
+GatewayImplementation::DoInitialize(const std::vector<std::string> & data)
+{
+    Update(data);
+}
+
+void
+GatewayImplementation::DoUpdate(const std::vector<std::string> & data)
+{
+    Update(data);
+}
+
+void
+GatewayImplementation::Update(const std::vector<std::string> & data)
+{
+    for (size_t i = 0; i < m_vehicles.GetN(); i++)
+    {
+        size_t startIndex = i * 4; // x y z broadcast
+        if (startIndex + 4 > data.size())
+        {
+            NS_LOG_ERROR("ERROR: received data with size " << data.size() << " but expected " << (startIndex + 4));
+            return;
+        }
+
+        Ptr<Node> vehicle = m_vehicles.Get(i);
+        Vector position(std::stoi(data[startIndex]), std::stoi(data[startIndex+1]), std::stoi(data[startIndex+2]));
+        vehicle->GetObject<ExternalMobilityModel>()->SetPosition(position);
+        
+        if (std::stoi(data[startIndex+3]))
+        {
+            NS_LOG_INFO("\tTriggered Send by " << i << " at " << Simulator::Now().As(Time::S));
+            DynamicCast<TriggeredSendApplication>(vehicle->GetApplication(1))->Send(10);
+        }
+
+        SetValue(i, std::to_string(m_count[i]));
+    }
 }
 
 void
@@ -68,31 +134,6 @@ ReportMobility(Ptr<const MobilityModel> mobility)
         << ", Node " << mobility->GetObject<Node>()->GetId()
         << ", Position " << mobility->GetPosition()
         << ", Velocity " << mobility->GetVelocity());
-}
-
-// TODO:
-//  wait for server to exist / attempt to re-connect
-class GatewayImplementation : public Gateway
-{
-    virtual void DoInitialize(const std::vector<std::string> & data);
-    virtual void DoUpdate(const std::vector<std::string> & data);
-};   
-
-void
-GatewayImplementation::DoInitialize(const std::vector<std::string> & data)
-{
-    // set initial positions
-    for (size_t i = 0; i < 3; i++)
-    {
-        SetValue(i, "0"); // receive count = 0
-    }
-}
-
-void
-GatewayImplementation::DoUpdate(const std::vector<std::string> & data)
-{
-    // update positions
-    // broadcast as required
 }
 
 int
@@ -145,6 +186,11 @@ main(int argc, char* argv[])
     const Time timeStop  = Seconds(10.0);
     const uint16_t port  = 8000;
 
+    const std::string gatewayAddress = "127.0.0.1";
+    const uint16_t gatewayPort = 1111;
+
+    GatewayImplementation gateway(vehicles);
+
     for (uint32_t i = 0; i < vehicles.GetN(); i++)
     {
         Ptr<Node> vehicle = vehicles.Get(i);
@@ -157,24 +203,20 @@ main(int argc, char* argv[])
 
         PacketSinkHelper serverHelper ("ns3::UdpSocketFactory", InetSocketAddress(Ipv4Address::GetAny(), port));
         ApplicationContainer serverApps = serverHelper.Install(vehicle);
-        serverApps.Get(0)->TraceConnect("Rx", addressStream.str(), MakeCallback(&PacketSinkTrace));
+        serverApps.Get(0)->TraceConnect("Rx", std::to_string(i), MakeCallback(&GatewayImplementation::HandleReceive, &gateway));
         serverApps.Start(timeStart);
         //serverApps.Stop(timeStop);
 
         TriggeredSendHelper clientHelper ("ns3::UdpSocketFactory", InetSocketAddress(broadcastAddress, port));
         clientHelper.SetAttribute("PacketSize", UintegerValue(1024));
-        clientHelper.SetAttribute("PacketInterval", TimeValue(MilliSeconds(200)));
+        clientHelper.SetAttribute("PacketInterval", TimeValue(MilliSeconds(100)));
 
         ApplicationContainer clientApps = clientHelper.Install(vehicle);
         clientApps.Start(timeStart);
         //clientApps.Stop(timeStop);
     }
 
-    const std::string gatewayAddress = "127.0.0.1";
-    const uint16_t gatewayPort = 1111;
-
-    GatewayImplementation gateway;
-    gateway.Connect(gatewayAddress, gatewayPort, 3); // server must be running before this line (or error)
+    gateway.Connect(gatewayAddress, gatewayPort, vehicles.GetN()); // server must be running before this line (or error)
 
     //Simulator::Stop(timeStop);
     Simulator::Run();
