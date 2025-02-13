@@ -59,7 +59,6 @@ class GatewayImplementation : public Gateway
     private:
         virtual void DoInitialize(const std::vector<std::string> & data);
         virtual void DoUpdate(const std::vector<std::string> & data);
-        void Update(const std::vector<std::string> & data);
 
         NodeContainer m_vehicles;
         std::vector<uint32_t> m_count;
@@ -93,32 +92,29 @@ GatewayImplementation::HandleReceive(std::string id, Ptr<const Packet> packet, c
 void
 GatewayImplementation::DoInitialize(const std::vector<std::string> & data)
 {
-    Update(data);
+    DoUpdate(data);
 }
 
 void
 GatewayImplementation::DoUpdate(const std::vector<std::string> & data)
 {
-    Update(data);
-}
-
-void
-GatewayImplementation::Update(const std::vector<std::string> & data)
-{
     for (size_t i = 0; i < m_vehicles.GetN(); i++)
     {
-        size_t startIndex = i * 4; // x y z broadcast
-        if (startIndex + 4 > data.size())
+        size_t startIndex = i * 7; // x y z vx vy vz broadcast
+        if (startIndex + 7 > data.size())
         {
-            NS_LOG_ERROR("ERROR: received data with size " << data.size() << " but expected " << (startIndex + 4));
+            NS_LOG_ERROR("ERROR: received data with size " << data.size() << " but expected " << (startIndex + 7));
             return;
         }
 
         Ptr<Node> vehicle = m_vehicles.Get(i);
         Vector position(std::stoi(data[startIndex]), std::stoi(data[startIndex+1]), std::stoi(data[startIndex+2]));
         vehicle->GetObject<ExternalMobilityModel>()->SetPosition(position);
+
+        Vector velocity(std::stoi(data[startIndex+3]), std::stoi(data[startIndex+4]), std::stoi(data[startIndex+5]));
+        vehicle->GetObject<ExternalMobilityModel>()->SetVelocity(velocity);
         
-        if (std::stoi(data[startIndex+3]))
+        if (std::stoi(data[startIndex+6]))
         {
             NS_LOG_INFO("\tTriggered Send by " << i << " at " << Simulator::Now().As(Time::S));
             DynamicCast<TriggeredSendApplication>(vehicle->GetApplication(1))->Send(10);
@@ -126,6 +122,7 @@ GatewayImplementation::Update(const std::vector<std::string> & data)
 
         SetValue(i, std::to_string(m_count[i]));
     }
+    SendResponse();
 }
 
 void

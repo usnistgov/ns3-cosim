@@ -59,6 +59,8 @@ namespace ns3
 
 NS_LOG_COMPONENT_DEFINE("Gateway");
 
+/* ========== PUBLIC MEMBER FUNCTIONS ======================================= */
+
 Gateway::Gateway(uint32_t dataSize, const std::string & delimiterField, const std::string & delimiterMessage):
     m_eventWait(),
     m_eventDestroy(),
@@ -131,29 +133,64 @@ Gateway::Connect(const std::string & serverAddress, uint16_t serverPort)
     m_thread = std::thread(&Gateway::RunThread, this);
 
     // wait until the thread forwards the next received message
-    NS_LOG_DEBUG("waiting for next update...");
+    NS_LOG_LOGIC("waiting for next update...");
     m_eventWait = Simulator::ScheduleNow(&Gateway::WaitForNextUpdate, this);
 }
-
-
-
-
 
 void
 Gateway::SetValue(uint32_t index, const std::string & value)
 {
     NS_LOG_FUNCTION(this << index << value);
 
-    if (index <= m_data.size())
+    if (index >= m_data.size())
     {
-        NS_LOG_DEBUG("DATA UPDATE: " << m_data[index] << " updated to " << value);
-        m_data[index] = value;
+        NS_FATAL_ERROR("ERROR: Gateway::SetValue called with i=" << index << " for a max size of " << m_data.size());
+    }
+    if (value.find(m_delimiterField) != std::string::npos)
+    {
+        NS_FATAL_ERROR("ERROR: Gateway::SetValue called with a value containing the protocol field delimiter");
+    }
+    if (value.find(m_delimiterMessage) != std::string::npos)
+    {
+        NS_FATAL_ERROR("ERROR: Gateway::SetValue called with a value containing the protocol message delimiter");
+    }
+    m_data[index] = value;
+}
+
+void
+Gateway::SendResponse()
+{
+    NS_LOG_FUNCTION(this);
+
+    if (m_state != STATE::CONNECTED)
+    {
+        NS_FATAL_ERROR("ERROR: Gateway::SendResponse called without an active connection to the server");
+    }
+
+    std::string message = "";
+    for (uint32_t i = 0; i < m_data.size(); i++)
+    {
+        if (i != 0)
+        {
+            message += m_delimiterField;
+        }
+        message += m_data[i];
+    }
+    message += m_delimiterMessage;
+
+    if (send(m_socket, message.c_str(), message.size(), 0) > 0)
+    {
+        NS_LOG_DEBUG("Gateway sent the message: " << message);
     }
     else
     {
-        NS_LOG_ERROR("ERROR: SetValue index of " << index << " exceeds message size of " << m_data.size());
+        NS_LOG_WARN("WARNING: Gateway::SendResponse failed to send the message: " << message);
     }
 }
+
+/* ========== PRIVATE MEMBER FUNCTIONS ====================================== */
+
+
 
 void
 Gateway::WaitForNextUpdate()
@@ -312,7 +349,7 @@ Gateway::ForwardUp()
     {
         m_timeStart = receivedTime;
         NS_LOG_INFO("Initialized Start Time as " << m_timeStart);
-        Simulator::ScheduleNow(&Gateway::HandleInitialize, this, receivedData);
+        Simulator::ScheduleNow(&Gateway::DoInitialize, this, receivedData);
     }
     else
     {
@@ -330,45 +367,16 @@ Gateway::ForwardUp()
 }
 
 void
-Gateway::HandleUpdate(std::vector<std::string> data)
+Gateway::HandleUpdate(const std::vector<std::string> & data)
 {
     NS_LOG_FUNCTION(this << data);
-
-    DoUpdate(data);
-    SendResponse();
 
     if (Simulator::Now() == m_timePause)
     {
         NS_LOG_INFO("waiting for next update...");
         m_eventWait = Simulator::ScheduleNow(&Gateway::WaitForNextUpdate, this);
     }
-}
-
-void
-Gateway::HandleInitialize(std::vector<std::string> data)
-{
-    NS_LOG_FUNCTION(this << data);
-    DoInitialize(data);
-    SendResponse();
-}
-
-void
-Gateway::SendResponse() // TODO: add time stamp
-{
-    NS_LOG_FUNCTION(this);
-
-    std::string message = "";
-    for (size_t i = 0; i < m_data.size(); i++)
-    {
-        if (i != 0)
-        {
-            message += m_delimiterField;
-        }
-        message += m_data[i];
-    }
-    message += m_delimiterMessage;
-
-    send(m_socket, message.c_str(), message.size(), 0); // check for errors
+    DoUpdate(data);
 }
 
 } // namespace ns3

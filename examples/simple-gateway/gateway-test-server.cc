@@ -116,11 +116,13 @@ main(int argc, char* argv[])
     }
     NS_LOG_INFO("client connected");
     
+    std::vector<uint16_t> xVelocity(numberOfNodes, 0);
     std::vector<uint16_t> xPosition(numberOfNodes, 0);
     std::string message = std::to_string(timeStart) + " 0";
     for (uint16_t i = 0; i < numberOfNodes; i++)
     {
-        message += " " + std::to_string(xPosition[i]) + " " + std::to_string(i) + " 0 0"; // x y z signal
+        message += " " + std::to_string(xPosition[i]) + " " + std::to_string(i) + " 0"; // x y z
+        message += " " + std::to_string(xVelocity[i]) + " 0 0 0"; // vx vy vz broadcast
     }
     message += "\r\n";
     
@@ -149,7 +151,8 @@ main(int argc, char* argv[])
         message = std::to_string(timeStart + timeDelta * i) + " 0";
         for (uint16_t n = 0; n < numberOfNodes; n++)
         {
-            xPosition[n] += std::rand() % positionDeltaX + 1;
+            xVelocity[n] = std::rand() % positionDeltaX + 1;
+            xPosition[n] += xVelocity[n];
 
             int transmit = 0;
             if (i % 5 == 0)
@@ -157,7 +160,8 @@ main(int argc, char* argv[])
                 transmit = std::rand() % 2;
             }
 
-            message += " " + std::to_string(xPosition[n]) + " " + std::to_string(n) + " 0 " + std::to_string(transmit);
+            message += " " + std::to_string(xPosition[n]) + " " + std::to_string(n) + " 0";
+            message += " " + std::to_string(xVelocity[n]) + " 0 0 " + std::to_string(transmit);
         }
         message += "\r\n";
     

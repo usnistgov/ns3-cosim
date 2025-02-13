@@ -82,27 +82,55 @@ class Gateway
          */
         void Connect(const std::string & serverAddress, uint16_t serverPort);
 
-        void SetValue(uint32_t dataIndex, const std::string & value);
+        /**
+         * @brief Set the value of one element to be sent to the server.
+         *
+         * This function only buffers data and does not send anything to the server (see Gateway::SendResponse).
+         *
+         * Exceptions:
+         *  1) the index must be less than the dataSize specified in the constructor.
+         *  2) the value must not contain either delimiter specified in the constructor.
+         *
+         * @param index the index of the element to update
+         * @param value the new value to assign to the element
+         */
+        void SetValue(uint32_t index, const std::string & value);
+
+        /**
+         * @brief Send the buffered data values to the server.
+         *
+         * This function will send a message to the server containing the number of elements specified at construction.
+         * Gateway::SetValue can be used to set the values of individual elements. If an element has not been updated
+         * since a previous call to this function, it will retain its previous value. If an element has never been
+         * assigned a value, the default value is the empty string.
+         *
+         * The sent message will be a string where the values are separated by the field delimiter specified in the
+         * constructor, postpended with the message delimiter specified in the constructor. 
+         *
+         * If there is a send error, a warning will be output (this is not considered an exception).
+         *
+         * Exceptions:
+         *  1) the function is called when the gateway is in a state other than CONNECTED.
+         */
+        void SendResponse();
     private:
-        enum STATE
+        enum STATE      // the gateway internal state
         {
-            CREATED,
-            CONNECTED,
-            STOPPING
+            CREATED,    // constructed
+            CONNECTED,  // Gateway::Connect called
+            STOPPING    // Gateway::StopThread called
         };
 
         void RunThread();
         void StopThread();
         void ForwardUp();
         void WaitForNextUpdate();
-        void SendResponse();
 
         std::string ReceiveNextMessage();
         
-        void HandleInitialize(std::vector<std::string> receivedData);
         virtual void DoInitialize(const std::vector<std::string> & receivedData) = 0;
 
-        void HandleUpdate(std::vector<std::string> receivedData);
+        void HandleUpdate(const std::vector<std::string> & receivedData);
         virtual void DoUpdate(const std::vector<std::string> & receivedData) = 0;
 
         uint32_t m_context;     //!< Simulator context when the gateway instance was created
