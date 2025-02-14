@@ -34,25 +34,12 @@
 
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <unistd.h>
 
 #include "ns3/log.h"
 #include "ns3/simulator.h"
 
 #include "gateway.h"
-
-
-
-
-#include "ns3/applications-module.h"
-
-#include <stdio.h>
-#include <string.h>
-#include <unistd.h>
-#include <cstdlib>
-
-#include <iostream>
-
-#include "ns3/node.h"
 
 namespace ns3
 {
@@ -80,9 +67,9 @@ Gateway::Gateway(uint32_t dataSize, const std::string & delimiterField, const st
     {
         NS_FATAL_ERROR("ERROR: gateway message delimiter cannot be empty");
     }
-    if (delimiterField == delimiterMessage)
+    if (delimiterField.find(delimiterMessage) != std::string::npos)
     {
-        NS_FATAL_ERROR("ERROR: gateway message and field delimiters must have different values");
+        NS_FATAL_ERROR("ERROR: gateway message delimiter cannot be a substring of the field delimiter");
     }
 
     m_context = Simulator::GetContext();
@@ -127,7 +114,7 @@ Gateway::Connect(const std::string & serverAddress, uint16_t serverPort)
     NS_LOG_INFO("Gateway connected to " << serverAddress << ":" << serverPort);
 
     // schedule a function to stop the socket thread when ns-3 ends
-    m_eventDestroy = Simulator::ScheduleDestroy(&Gateway::StopThread, this);
+    m_eventDestroy = Simulator::ScheduleDestroy(&Gateway::Stop, this);
 
     // start a thread to handle the socket connection
     m_thread = std::thread(&Gateway::RunThread, this);
@@ -190,43 +177,39 @@ Gateway::SendResponse()
 
 /* ========== PRIVATE MEMBER FUNCTIONS ====================================== */
 
-
-
 void
-Gateway::WaitForNextUpdate()
-{
-    // pause ns-3 time progression until this event is cancelled
-    m_eventWait = Simulator::ScheduleNow(&Gateway::WaitForNextUpdate, this);
-}
-
-void
-Gateway::StopThread()
+Gateway::Stop() // how does this interact with NS_FATAL_ERROR ?
 {
     NS_LOG_FUNCTION(this);
 
-    if (m_state == STATE::CONNECTED)
-    {
-        m_state = STATE::STOPPING; // trigger the thread to stop
+    bool connected = (m_state == STATE::CONNECTED);
 
+    m_state = STATE::STOPPING; // must set before m_thread.join() for the thread to exit
+
+    if (connected)
+    {
         if (m_thread.joinable())
         {
-            NS_LOG_INFO("Waiting for the gateway thread to stop...");
+            NS_LOG_LOGIC("waiting for the gateway thread to stop...");
             m_thread.join(); // wait for the thread to stop
-            NS_LOG_INFO("...gateway thread stopped.");
+            NS_LOG_LOGIC("...gateway thread stopped.");
         }
-
         close(m_socket);
-    }
-    else
-    {
-        NS_LOG_LOGIC("Gateway::StopThread skipped - the gateway is not connected");
     }
 
     if (m_eventWait.IsPending())
     {
         m_eventWait.Cancel();
-        NS_LOG_INFO("Cancelled a pending WaitForNextUpdate");
+        NS_LOG_DEBUG("wait event cancelled");
     }
+
+    if (m_eventDestroy.IsPending()) // if Gateway::Stop was called before Simulator::Stop
+    {
+        m_eventDestroy.Cancel();
+        NS_LOG_DEBUG("destroy event cancelled");
+    }
+
+    NS_LOG_INFO("Gateway stopped");
 }
 
 void
@@ -234,68 +217,79 @@ Gateway::RunThread()
 {
     NS_LOG_FUNCTION(this);
 
+    const size_t BUFFER_SIZE = 4096;
+    char recvBuffer[BUFFER_SIZE];   // buffer for recv call
+    std::string receivedData;       // received message content
+    size_t messageSize;             // received message size (excluding the message delimiter)
+
     while (m_state == STATE::CONNECTED)
     {
-        std::string message = ReceiveNextMessage();
+        receivedData = m_messageBuffer;  // recover any partially received message
 
-        // the RunThread needs the main thread to execute a function (either StopThread or ForwardUp)
-        // it schedules the function for this time step on behalf of the main thread's m_context
-        // then, Simulator::Run from the main thread will process the scheduled function
-        if (message.empty()) // TODO: test whether this works as intended
+        // this loop has the following possible outcomes:
+        //  messageSize = receivedData.size() - m_delimiterMessage.size()   [received one message]
+        //  messageSize < receivedData.size() - m_delimiterMessage.size()   [received more than one message]
+        //  messageSize = std::string::npos                                 [unable to receive messages]
+        while ((messageSize = receivedData.find(m_delimiterMessage)) == std::string::npos)
         {
-            NS_LOG_ERROR("Stopping the gateway thread due to a receive error");
-            Simulator::ScheduleWithContext(m_context, Time(0), MakeEvent(&Gateway::StopThread, this));
+            NS_LOG_LOGIC("\twaiting to receive data...");
+            int bytesReceived = recv(m_socket, &recvBuffer[0], BUFFER_SIZE, 0);
+
+            if (bytesReceived > 0)
+            {
+                NS_LOG_LOGIC("\t...data received");
+                receivedData.append(&recvBuffer[0], bytesReceived);
+            }
+            else if (bytesReceived == 0) // connection closed
+            {
+                NS_LOG_LOGIC("\t...connection closed");
+                if (!receivedData.empty())
+                {
+                    NS_LOG_WARN("WARNING: dropped partial message " << receivedData);
+                }
+                break; // messageSize = std::string::npos  
+            }
+            else
+            {
+                NS_LOG_ERROR("ERROR: gateway socket connection error");
+                break; // messageSize = std::string::npos  
+            }
+        }
+
+        // RunThread needs the main thread to execute the next function (either Stop or ForwardUp)
+        // it schedules the function on behalf of the main thread's m_context to execute now
+        // Simulator::ScheduleWithContext is thread safe
+        if (messageSize == std::string::npos)
+        {
+            Simulator::ScheduleWithContext(m_context, Time(0), MakeEvent(&Gateway::Stop, this));
             break; // prevent additional receive attempts
         }
-        else
+
+        std::string receivedMessage = receivedData.substr(0, messageSize);
+        m_messageBuffer = receivedData.substr(messageSize + m_delimiterMessage.size());
+
+        NS_LOG_DEBUG("forwarding new message: " << receivedMessage);
         {   // critical section start
             std::unique_lock lock(m_messageQueueMutex);
-            NS_LOG_LOGIC("Pushing a new message to the gateway message queue");
-            m_messageQueue.push(message);
-            Simulator::ScheduleWithContext(m_context, Time(0), MakeEvent(&Gateway::ForwardUp, this));
+            m_messageQueue.push(receivedMessage);    
         }   // critical section end
+        Simulator::ScheduleWithContext(m_context, Time(0), MakeEvent(&Gateway::ForwardUp, this));
     }
 }
 
-std::string
-Gateway::ReceiveNextMessage()
+void
+Gateway::WaitForNextUpdate() // do not add log output to this function
 {
-    NS_LOG_FUNCTION(this);
-    
-    const size_t BUFFER_SIZE = 4096;
-    char recvBuffer[BUFFER_SIZE];
-
-    std::string message = m_messageBuffer;
-    size_t separatorIndex;
-
-    m_messageBuffer.clear();
-
-    while ((separatorIndex = message.find(m_delimiterMessage)) == std::string::npos)
+    if (m_state != STATE::STOPPING) // this probably isn't necessary
     {
-        int bytesReceived = recv(m_socket, &recvBuffer[0], BUFFER_SIZE, 0);
-
-        if (bytesReceived > 0)
+        if (m_eventWait.IsPending())
         {
-            message.append(&recvBuffer[0], bytesReceived);
+            NS_LOG_WARN("WARNING: Gateway::WaitForNextUpdate scheduled multiple times"); // except this one!
+            m_eventWait.Cancel();
         }
-        else if (bytesReceived == 0)
-        {
-            NS_LOG_ERROR("ERROR: gateway socket terminated ");
-            return ""; // message not received
-        }
-        else
-        {
-            NS_LOG_ERROR("ERROR: gateway socket connection error");
-            return ""; // message not received
-        }
+        // pause Simulator time progression until this event is cancelled
+        m_eventWait = Simulator::ScheduleNow(&Gateway::WaitForNextUpdate, this);
     }
-
-    m_messageBuffer = message.substr(separatorIndex + m_delimiterMessage.size());
-    message.erase(separatorIndex);
-        
-    NS_LOG_INFO("gateway received the message: " << message);
-
-    return message; // message received
 }
 
 void
@@ -303,66 +297,73 @@ Gateway::ForwardUp()
 {
     NS_LOG_FUNCTION(this);
 
+    // get the message to process
     std::string message;
     {   // critical section start
         std::unique_lock lock(m_messageQueueMutex);
+        if (m_messageQueue.empty())
+        {
+            NS_FATAL_ERROR("Gateway::ForwardUp called without any queued messages");
+        }
         message = m_messageQueue.front();
         m_messageQueue.pop();
     }   // critical section end
+    NS_LOG_DEBUG("processing message: " << message);
 
-    std::vector<std::string> receivedData;
-
+    // split the message into values
     size_t index;
+    std::vector<std::string> values;
     while ((index = message.find(m_delimiterField)) != std::string::npos)
     {
-        receivedData.push_back(message.substr(0, index));
+        values.push_back(message.substr(0, index));
         message.erase(0, index + m_delimiterField.size());
     }
-    receivedData.push_back(message);
+    values.push_back(message);
 
-    if (receivedData.size() < 2)
-    {
-        NS_LOG_ERROR("ERROR: bad message format - missing header");
-        return;
-    }
-
-    Time receivedTime;
+    // remove the timestamp header
+    Time timestamp;
     try
     {
-        const std::string & seconds = receivedData[0];      // int32 represented as string
-        const std::string & nanoseconds = receivedData[1];  // int32 represented as string
-        receivedTime = Seconds(std::stoi(seconds)) + NanoSeconds(std::stoi(nanoseconds));
+        const std::string & seconds = values.at(0);     // int32 represented as string
+        const std::string & nanoseconds = values.at(1); // int32 represented as string
+        timestamp = Seconds(std::stoi(seconds)) + NanoSeconds(std::stoi(nanoseconds));
+        NS_LOG_DEBUG("received time: " << timestamp);
     }
     catch (std::exception & e)
     {
-        NS_LOG_ERROR("ERROR: bad message format - invalid timestamp");
-        return;
+        NS_FATAL_ERROR("ERROR: received invalid message header");
     }
-    receivedData.erase(receivedData.begin(), receivedData.begin()+2);
+    values.erase(values.begin(), values.begin()+2);
 
-    if (receivedTime.IsStrictlyNegative()) // terminate
+    // process based on timestamp content
+    if (timestamp.IsStrictlyNegative()) // signal to terminate
     {
-        NS_LOG_INFO("Received terminate: " << receivedTime);
-        Simulator::Stop(); // TODO: check if working
+        NS_LOG_INFO("Gateway received the terminate message");
+        Simulator::Stop();
     }
-    else if (m_timeStart.IsStrictlyNegative()) // initial condition
+    else if (m_timeStart.IsStrictlyNegative()) // first value received
     {
-        m_timeStart = receivedTime;
-        NS_LOG_INFO("Initialized Start Time as " << m_timeStart);
-        Simulator::ScheduleNow(&Gateway::DoInitialize, this, receivedData);
+        m_timeStart = timestamp;
+        NS_LOG_INFO("Gateway reference time set as " << timestamp);
+        Simulator::ScheduleNow(&Gateway::DoInitialize, this, values);
     }
-    else
+    else // normal message
     {
-        if (m_eventWait.IsPending()) // TODO: move
+        if (m_eventWait.IsPending())
         {
             m_eventWait.Cancel();
         }
-        NS_LOG_INFO("...update received for " << receivedTime);
+        NS_LOG_INFO("...update received for " << timestamp);
 
-        m_timePause = receivedTime - m_timeStart; // TODO: check if negative
+        // calculate the time difference
+        m_timePause = timestamp - m_timeStart;
         ns3::Time timeDelta = m_timePause - Simulator::Now();
+        if (timeDelta.IsStrictlyNegative()) // 0 allowed
+        {
+            NS_FATAL_ERROR("ERROR: received timestamps were not increasing values");
+        }
         NS_LOG_INFO("advancing time from " << Simulator::Now() << " to " << m_timePause);
-        Simulator::Schedule(timeDelta, &Gateway::HandleUpdate, this, receivedData);
+        Simulator::Schedule(timeDelta, &Gateway::HandleUpdate, this, values);
     }
 }
 

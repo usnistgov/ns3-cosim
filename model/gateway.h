@@ -47,11 +47,26 @@
 namespace ns3
 {
 
+/**
+ * An abstract base class that maintains a socket connection with a server to exchange data during simulation runtime.
+ * The pure virtual Gateway::DoInitialize and Gateway::DoUpdate functions must be implemented in a derived class to
+ * specify how data received from the server is processed. The purpose of this class is to handle time management,
+ * turning the ns-3 simulator into a discrete-time simulation that operates in lock-step with the server.
+ *
+ * All packets, sent and received, are strings with the format "v1_v2_.._vn|", where:
+ *  1) _ is a user-specified delimiter that separates elements within the message (see the constructor)
+ *  2) | is a user-specified delimiter that indicates the end of the message (see the constructor)
+ *  3) v1 .. vn are string elements that contain any value excluding the delimiters from 1 and 2
+ */
 class Gateway
 {
     public:
         /**
          * @brief Construct a new gateway instance.
+         *
+         * Exceptions:
+         *  1) delimiterField and delimiterMessage must have non-empty values
+         *  2) delimiterMessage must not be a substring of delimiterField
          *
          * @param dataSize the number of elements the gateway sends to its server
          * @param delimiterField the delimiter used between values within one message (default: " ")
@@ -121,16 +136,72 @@ class Gateway
             STOPPING    // Gateway::StopThread called
         };
 
+        /**
+         * @brief Stop the gateway.
+         *
+         * Side Effects:
+         *  1) a signal is sent for the thread to exit, and the thread is joined.
+         *  2) if the client socket is connected to a server, the socket is closed.
+         *  3) the gateway will no longer affect/prevent the Simulator time progression.
+         *
+         * This function is safe to call any number of times, and in any context within the main Simulator thread.
+         */
+        void Stop();
+
+        /**
+         * @brief Read data from the socket until the connection closes.
+         *
+         * This function executes until either the socket terminates or Gateway::Stop is called from the main thread.
+         * If the socket terminates, Gateway::Stop is scheduled before the function returns. When data is received from
+         * the socket, Gateway::ForwardUp is scheduled to process the data.
+         */
         void RunThread();
-        void StopThread();
-        void ForwardUp();
+
+        /**
+         * @brief Pause the simulation by scheduling events to execute now until cancelled.
+         *
+         * This function schedules itself to execute immediately forever. Interrupt it by cancelling m_eventWait.
+         */
         void WaitForNextUpdate();
 
-        std::string ReceiveNextMessage();
-        
+        /**
+         * @brief Processes one received message.
+         *
+         * Dependent on the message timestamp, the following outcomes are possible:
+         *  1) if the received timestamp is negative, Simulator::Stop is called (and the message it not processed).
+         *  2) if this is the first message, Gateway::DoInitialize is scheduled to execute now.
+         *  3) otherwise, Gateway::HandleUpdate is scheduled for the received timestamp.
+         *
+         * The timestamp is removed from the message before scheduling Gateway::DoInitialize and Gateway::HandleUpdate.
+         *
+         * Exceptions:
+         *  1) m_messageQueue must contain at least one element.
+         *  2) the message must begin with two integers that represent a (seconds, nanoseconds) timestamp.
+         *  3) the received timestamps must be increasing between consecutive calls.
+         */
+        void ForwardUp();
+
+        /**
+         * @brief Handle processing a received message prior to execution of the callback functions.
+         *
+         * This function is responsible for pausing simulation time if there are no messages pending in the queue.
+         *
+         * @param receivedData the received message content excluding the header/timestamp
+         */ 
+        void HandleUpdate(const std::vector<std::string> & receivedData);
+
+        /**
+         * @brief Callback to process the first message received from the server.
+         *
+         * @param receivedData the received message content excluding the header/timestamp
+         */        
         virtual void DoInitialize(const std::vector<std::string> & receivedData) = 0;
 
-        void HandleUpdate(const std::vector<std::string> & receivedData);
+        /**
+         * @brief Callback to process a message received from the server.
+         *
+         * @param receivedData the received message content excluding the header/timestamp
+         */ 
         virtual void DoUpdate(const std::vector<std::string> & receivedData) = 0;
 
         uint32_t m_context;     //!< Simulator context when the gateway instance was created
