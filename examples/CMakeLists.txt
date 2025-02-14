@@ -20,8 +20,8 @@ build_lib_example(
 )
 
 build_lib_example(
-    NAME gateway-vehicle-example
-    SOURCE_FILES simple-gateway/gateway-vehicle-example.cc
+    NAME simple-gateway
+    SOURCE_FILES simple-gateway.cc
     LIBRARIES_TO_LINK
         ${libcore}
         ${libnetwork}
@@ -31,8 +31,8 @@ build_lib_example(
 )
 
 build_lib_example(
-    NAME gateway-test-server
-    SOURCE_FILES simple-gateway/gateway-test-server.cc
+    NAME simple-gateway-server
+    SOURCE_FILES simple-gateway-server.cc
     LIBRARIES_TO_LINK
         ${libcore}
 )
