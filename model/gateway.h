@@ -41,8 +41,7 @@
 #include <thread>
 #include <vector>
 
-#include "ns3/event-id.h"
-#include "ns3/nstime.h"
+#include "ns3/core-module.h"
 
 namespace ns3
 {

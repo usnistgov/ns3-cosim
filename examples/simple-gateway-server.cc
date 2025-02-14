@@ -30,15 +30,15 @@
  * Author: Thomas Roth <thomas.roth@nist.gov>
 */
 
-#include <iostream>
-#include <unistd.h>
 #include <arpa/inet.h>
-#include <sys/socket.h>
 #include <netinet/in.h>
-#include <cstring>
-#include <thread>
+#include <sys/socket.h>
+#include <unistd.h>
+
+#include <cstdlib>
+#include <ctime>
+#include <string>
 #include <vector>
-#include <sstream>
 
 #include "ns3/core-module.h"
 
@@ -49,144 +49,141 @@ NS_LOG_COMPONENT_DEFINE("SimpleGatewayServer");
 int
 main(int argc, char* argv[])
 {
-    bool enableLogging      = true;
-    uint64_t timeStart      = 0;
+    bool verboseLogs        = false;
+    uint32_t timeStart      = 0;
     uint32_t timeDelta      = 1;
-    uint16_t positionDeltaX = 10;
-    uint16_t serverPort     = 1111;
-
-    uint64_t iterations     = 30;
+    uint32_t iterations     = 20;
     uint16_t numberOfNodes  = 3;
+    uint16_t positionDeltaX = 10;
+    uint16_t serverPort     = 8000;
 
     CommandLine cmd(__FILE__);
-    cmd.AddValue("logging", "Enable/disable detailed output logs (default=true)", enableLogging);
+    cmd.AddValue("verbose", "Enable/disable detailed log output", verboseLogs);
     cmd.AddValue("timeStart", "Starting simulation time in seconds", timeStart);
-    cmd.AddValue("timeDelta", "Step size of simulation time in seconds", timeDelta);
-    cmd.AddValue("positionDeltaX", "Maximum increase per time step to the x-coordinate of each node", positionDeltaX);
-    cmd.AddValue("serverPort", "Port number for the UDP Server", serverPort);
+    cmd.AddValue("timeDelta", "Simulation step size in seconds", timeDelta);
     cmd.AddValue("iterations", "Number of time steps to simulate", iterations);
     cmd.AddValue("numberOfNodes", "Number of vehicle nodes to simulate", numberOfNodes);
+    cmd.AddValue("positionDeltaX", "Maximum increase per time step to a node's x-coordinate", positionDeltaX);
+    cmd.AddValue("serverPort", "Port number of the UDP Server", serverPort);
     cmd.Parse(argc, argv);
-
-    if (enableLogging)
-    {
-        LogComponentEnable("SimpleGatewayServer", LOG_LEVEL_ALL);
-    }
-    NS_LOG_INFO("started");
 
     std::srand(std::time(NULL));
 
+    if (verboseLogs)
+    {
+        LogComponentEnable("SimpleGatewayServer", LOG_LEVEL_ALL);
+    }
+    else
+    {
+        LogComponentEnable("SimpleGatewayServer", LOG_LEVEL_INFO);
+    }
+
+    // create the server socket
     int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
     if (serverSocket == -1)
     {
-        NS_LOG_ERROR("Failed to create the socket");
-        return 1;
+        NS_FATAL_ERROR("ERROR: failed to create the socket");
+    }
+    int reuse = 1;
+    if (setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) == -1)
+    {
+        NS_FATAL_ERROR("ERROR: failed to set the socket options");
     }
 
+    // set the server address
     struct sockaddr_in serverAddress;
     serverAddress.sin_family = AF_INET;
     serverAddress.sin_port = htons(serverPort);
     serverAddress.sin_addr.s_addr = INADDR_ANY;
 
-    int reuse = 1;
-    if (setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) == -1)
-    {
-        NS_LOG_ERROR("Failed to set socket options");
-        return 1;
-    }
-
-    // Bind the socket to the server address
+    // bind the socket to the server address
     if (bind(serverSocket, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) == -1)
     {
-        NS_LOG_ERROR("Failed to bind socket");
-        return 1;
+        NS_FATAL_ERROR("ERROR: failed to bind the socket to port " << serverPort);
     }
-
+    
+    // listen for client connections
     if (listen(serverSocket, 1) == -1)
     {
-        NS_LOG_ERROR("Failed to listen for connections");
-        return 1;
+        NS_FATAL_ERROR("ERROR: failed to listen for client connections");
     }
+    NS_LOG_INFO("Started server on Port " << serverPort);
 
+    // accept a client connection
     int clientSocket = accept(serverSocket, NULL, NULL);
     if (clientSocket == -1)
     {
-        NS_LOG_ERROR("Failed to accept connection");
-        return 1;
+        NS_FATAL_ERROR("ERROR: failed to accept the client connection");
     }
-    NS_LOG_INFO("client connected");
-    
-    std::vector<uint16_t> xVelocity(numberOfNodes, 0);
-    std::vector<uint16_t> xPosition(numberOfNodes, 0);
-    std::string message = std::to_string(timeStart) + " 0";
-    for (uint16_t i = 0; i < numberOfNodes; i++)
-    {
-        message += " " + std::to_string(xPosition[i]) + " " + std::to_string(i) + " 0"; // x y z
-        message += " " + std::to_string(xVelocity[i]) + " 0 0 0"; // vx vy vz broadcast
-    }
-    message += "\r\n";
-    
-    if (send(clientSocket, message.c_str(), message.size(), 0) == -1)
-    {
-        NS_LOG_ERROR("Failed to send message");
-    }
-    NS_LOG_INFO("sent message " << message);
+    NS_LOG_INFO("Accepted a client connection");
+
+    /* ========== START MESSAGE PROTOCOL =====================================*/
 
     const size_t BUFFER_SIZE = 4096;
-    char buffer[BUFFER_SIZE];
+    char recvBuffer[BUFFER_SIZE];
 
-    int bytesReceived = recv(clientSocket, buffer, BUFFER_SIZE, 0);
-    if (bytesReceived == -1)
+    std::vector<uint16_t> xVelocity(numberOfNodes, 0);
+    std::vector<uint16_t> xPosition(numberOfNodes, 0);
+    std::vector<uint16_t> broadcast(numberOfNodes, 0);
+    
+    for (uint32_t i = 0; i < iterations; i++)
     {
-        NS_LOG_ERROR("received bad response");
-    }
-    else if(bytesReceived >= 2)
-    {
-        buffer[bytesReceived - 2] = '\0';
-        NS_LOG_INFO("received " << buffer);
-    }
+        uint32_t timeNow = timeStart + timeDelta * i;
+        NS_LOG_INFO("t = " << timeNow);
 
-    for (uint64_t i = 1; i < iterations; i++)
-    {
-        message = std::to_string(timeStart + timeDelta * i) + " 0";
+        // create the next message
+        std::string message = std::to_string(timeNow) + " 0";                               // timestamp header
         for (uint16_t n = 0; n < numberOfNodes; n++)
         {
-            xVelocity[n] = std::rand() % positionDeltaX + 1;
-            xPosition[n] += xVelocity[n];
-
-            int transmit = 0;
-            if (i % 5 == 0)
-            {
-                transmit = std::rand() % 2;
-            }
-
-            message += " " + std::to_string(xPosition[n]) + " " + std::to_string(n) + " 0";
-            message += " " + std::to_string(xVelocity[n]) + " 0 0 " + std::to_string(transmit);
+            message += " " + std::to_string(xPosition[n]) + " " + std::to_string(n) + " 0"; // position vector
+            message += " " + std::to_string(xVelocity[n]) + " 0 0";                         // velocity vector
+            message += " " + std::to_string(broadcast[n]);                                  // broadcast bool
         }
-        message += "\r\n";
-    
+        NS_LOG_DEBUG("next message: " << message);
+        message += "\r\n";                                                                  // end of message
+
+        // send the next message
         if (send(clientSocket, message.c_str(), message.size(), 0) == -1)
         {
-            NS_LOG_ERROR("Failed to send message");
+            NS_FATAL_ERROR("ERROR: failed to send a message");
         }
-        NS_LOG_INFO("sent message " << message);
 
-        int bytesReceived = recv(clientSocket, buffer, BUFFER_SIZE, 0);
+        // receive client response
+        int bytesReceived = recv(clientSocket, recvBuffer, BUFFER_SIZE - 1, 0);
         if (bytesReceived == -1)
         {
-            NS_LOG_ERROR("received bad response");
+            NS_FATAL_ERROR("ERROR: failed to receive response");
         }
-        else if(bytesReceived >= 2)
+        else if (bytesReceived == 0)
         {
-            buffer[bytesReceived - 2] = '\0';
-            NS_LOG_INFO("received " << buffer);
+            NS_LOG_WARN("WARNING: client socket terminated connection");
+            break;
         }
-    }
+        else
+        {
+            recvBuffer[bytesReceived] = '\0'; // bytesReceived < BUFFER_SIZE
+            NS_LOG_DEBUG("received message: " << recvBuffer);
+        }
 
-    message = "-1 0\r\n";
-    if (send(clientSocket, message.c_str(), message.size(), 0) == -1)
-    {
-        NS_LOG_ERROR("Failed to send message");
+        if (i == iterations - 1) // last iteration
+        {
+            message = "-1 0\r\n"; // terminate message
+            if (send(clientSocket, message.c_str(), message.size(), 0) == -1)
+            {
+                NS_FATAL_ERROR("ERROR: failed to send a message");
+            }
+            NS_LOG_INFO("Sent terminate message");
+        }
+        else
+        {
+            // simulate node movement
+            for (uint16_t n = 0; n < numberOfNodes; n++)
+            {
+                xVelocity[n] = std::rand() % positionDeltaX + 1;
+                xPosition[n] = xPosition[n] + xVelocity[n];
+                broadcast[n] = (i % 5 == 0) && (std::rand() % 2 == 0);  // on multiples of 5, 50 % chance
+            }
+        }
     }
 
     close(clientSocket);

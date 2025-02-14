@@ -36,9 +36,6 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include "ns3/log.h"
-#include "ns3/simulator.h"
-
 #include "gateway.h"
 
 namespace ns3

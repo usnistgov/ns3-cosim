@@ -185,7 +185,7 @@ main(int argc, char* argv[])
     const uint16_t port  = 8000;
 
     const std::string gatewayAddress = "127.0.0.1";
-    const uint16_t gatewayPort = 1111;
+    const uint16_t gatewayPort = 8000;
 
     GatewayImplementation gateway(vehicles);
 
