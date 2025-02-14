@@ -50,11 +50,11 @@ int
 main(int argc, char* argv[])
 {
     bool verboseLogs        = false;
-    uint32_t timeStart      = 0;
-    uint32_t timeDelta      = 1;
+    uint32_t timeStart      = 0;    // s
+    uint32_t timeDelta      = 1;    // s
     uint32_t iterations     = 20;
     uint16_t numberOfNodes  = 3;
-    uint16_t positionDeltaX = 10;
+    uint16_t positionDeltaX = 25;   // m
     uint16_t serverPort     = 8000;
 
     CommandLine cmd(__FILE__);
@@ -181,7 +181,7 @@ main(int argc, char* argv[])
             {
                 xVelocity[n] = std::rand() % positionDeltaX + 1;
                 xPosition[n] = xPosition[n] + xVelocity[n];
-                broadcast[n] = (i % 5 == 0) && (std::rand() % 2 == 0);  // on multiples of 5, 50 % chance
+                broadcast[n] = (i % 5 == 0) && (std::rand() % 2 == 0); // on multiples of 5, 50 % chance
             }
         }
     }

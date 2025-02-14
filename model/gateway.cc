@@ -160,13 +160,10 @@ Gateway::SendResponse()
         }
         message += m_data[i];
     }
+    NS_LOG_DEBUG("Gateway sending the message: " << message);
     message += m_delimiterMessage;
 
-    if (send(m_socket, message.c_str(), message.size(), 0) > 0)
-    {
-        NS_LOG_DEBUG("Gateway sent the message: " << message);
-    }
-    else
+    if (send(m_socket, message.c_str(), message.size(), 0) == -1)
     {
         NS_LOG_WARN("WARNING: Gateway::SendResponse failed to send the message: " << message);
     }
@@ -350,7 +347,7 @@ Gateway::ForwardUp()
         {
             m_eventWait.Cancel();
         }
-        NS_LOG_INFO("...update received for " << timestamp);
+        NS_LOG_LOGIC("...update received for " << timestamp);
 
         // calculate the time difference
         m_timePause = timestamp - m_timeStart;
@@ -371,7 +368,7 @@ Gateway::HandleUpdate(const std::vector<std::string> & data)
 
     if (Simulator::Now() == m_timePause)
     {
-        NS_LOG_INFO("waiting for next update...");
+        NS_LOG_LOGIC("waiting for next update...");
         m_eventWait = Simulator::ScheduleNow(&Gateway::WaitForNextUpdate, this);
     }
     DoUpdate(data);

@@ -30,7 +30,8 @@
  * Author: Thomas Roth <thomas.roth@nist.gov>
 */
 
-#include <sstream>
+#include <string>
+#include <vector>
 
 #include "ns3/applications-module.h"
 #include "ns3/core-module.h"
@@ -40,31 +41,54 @@
 #include "ns3/network-module.h"
 
 #include "ns3/external-mobility-model.h"
-#include "ns3/gateway.h"
-#include "ns3/triggered-send-helper.h"
 #include "ns3/triggered-send-application.h"
+#include "ns3/triggered-send-helper.h"
+
+#include "ns3/gateway.h"
 
 using namespace ns3;
 
-NS_LOG_COMPONENT_DEFINE("GatewayVehicleExample");
+NS_LOG_COMPONENT_DEFINE("SimpleGateway");
 
-// TODO:
-//  wait for server to exist / attempt to re-connect
-class GatewayImplementation : public Gateway
+/*
+ * An example that manages a set of nodes (representing vehicles) whose mobility is controlled by the remote server.
+ *
+ * The received data format is:
+ *  {P_X1, P_Y1, P_Z1, V_X1, V_Y1, V_Z1, Send_1, ..., P_Xn, P_Yn, P_Zn, V_X1n, V_Yn, V_Zn, Send_n}
+ * where:
+ *  {P_Xi, P_Yi, P_Zi} is a Vector that represents the Position of vehicle i
+ *  {V_Xi, V_Yi, V_Zi} is a Vector that represents the Velocity of vehicle i
+ *  Send_i is a boolean that indicates whether vehicle i should broadcast
+ *
+ * The response data format is:
+ *  {recvCount_1, ..., recvCount_n}
+ * where:
+ *  recvCount_i is the number of times vehicle i has received a broadcast
+ *
+ * A response is sent each time data is received.
+ */
+class SimpleGateway : public Gateway
 {
     public:
-        GatewayImplementation(NodeContainer vehicles);
+        // initialize a simple gateway where n = vehicles.GetN()
+        SimpleGateway(NodeContainer vehicles);
 
+        // this function handles receiving broadcast messages from ns-3 (not the remote server)
+        //  id indicates the vehicle index that received the message; the other arguments are ignored
         void HandleReceive(std::string id, Ptr<const Packet> packet, const Address &clientAddress);
     private:
+        // this function handles processing the first message received from the remote server
+        //  the simple gateway doesn't require any initialization, so this just calls DoUpdate
         virtual void DoInitialize(const std::vector<std::string> & data);
+
+        // this function handles processing messages received from the remote server
         virtual void DoUpdate(const std::vector<std::string> & data);
 
-        NodeContainer m_vehicles;
-        std::vector<uint32_t> m_count;
+        NodeContainer m_vehicles;       // the nodes representing vehicles that are managed by the gateway
+        std::vector<uint16_t> m_count;  // the number of times each vehicle has received a broadcast
 };
 
-GatewayImplementation::GatewayImplementation(NodeContainer vehicles):
+SimpleGateway::SimpleGateway(NodeContainer vehicles):
     Gateway(vehicles.GetN()),
     m_vehicles(vehicles),
     m_count(vehicles.GetN(), 0)
@@ -73,62 +97,60 @@ GatewayImplementation::GatewayImplementation(NodeContainer vehicles):
 }
 
 void
-GatewayImplementation::HandleReceive(std::string id, Ptr<const Packet> packet, const Address &clientAddress)
+SimpleGateway::HandleReceive(std::string id, Ptr<const Packet> packet, const Address &clientAddress)
 {
-    NS_LOG_INFO("\tmessage received by " << id << " at " << Simulator::Now().As(Time::S));
-
-    size_t vehicleId = std::stoi(id);
-
-    if (vehicleId <= m_count.size())
-    {
-        m_count[vehicleId] += 1;
-    }
-    else
-    {
-        NS_LOG_ERROR("ERROR: HandleReceive called with index " << vehicleId << " > " << m_count.size());
-    }
+    NS_LOG_INFO("At time " << Simulator::Now().As(Time::S) << ", Node " << id << " received a broadcast");
+    m_count.at(std::stoi(id)) += 1;
 }
 
 void
-GatewayImplementation::DoInitialize(const std::vector<std::string> & data)
+SimpleGateway::DoInitialize(const std::vector<std::string> & data)
 {
     DoUpdate(data);
 }
 
 void
-GatewayImplementation::DoUpdate(const std::vector<std::string> & data)
+SimpleGateway::DoUpdate(const std::vector<std::string> & data)
 {
-    for (size_t i = 0; i < m_vehicles.GetN(); i++)
+    NS_LOG_FUNCTION(this << data);
+
+    static const uint32_t ELEMENTS_PER_VEHICLE = 7; // Position_{x,y,z} + Velocity_{x,y,z} + SendFlag
+    
+    for (uint32_t i = 0; i < m_vehicles.GetN(); i++)
     {
-        size_t startIndex = i * 7; // x y z vx vy vz broadcast
-        if (startIndex + 7 > data.size())
+        Ptr<Node> vehicle = m_vehicles.Get(i);
+        uint32_t dataIndex = i * ELEMENTS_PER_VEHICLE;
+        
+        if (dataIndex + ELEMENTS_PER_VEHICLE > data.size())
         {
-            NS_LOG_ERROR("ERROR: received data with size " << data.size() << " but expected " << (startIndex + 7));
-            return;
+            NS_FATAL_ERROR("ERROR: received data has insufficient size");
         }
 
-        Ptr<Node> vehicle = m_vehicles.Get(i);
-        Vector position(std::stoi(data[startIndex]), std::stoi(data[startIndex+1]), std::stoi(data[startIndex+2]));
+        // update the vehicle position
+        Vector position(std::stoi(data[dataIndex]), std::stoi(data[dataIndex+1]), std::stoi(data[dataIndex+2]));
         vehicle->GetObject<ExternalMobilityModel>()->SetPosition(position);
 
-        Vector velocity(std::stoi(data[startIndex+3]), std::stoi(data[startIndex+4]), std::stoi(data[startIndex+5]));
+        // update the vehicle velocity
+        Vector velocity(std::stoi(data[dataIndex+3]), std::stoi(data[dataIndex+4]), std::stoi(data[dataIndex+5]));
         vehicle->GetObject<ExternalMobilityModel>()->SetVelocity(velocity);
         
-        if (std::stoi(data[startIndex+6]))
+        // handle the send flag
+        if (std::stoi(data[dataIndex+6]))
         {
-            NS_LOG_INFO("\tTriggered Send by " << i << " at " << Simulator::Now().As(Time::S));
-            DynamicCast<TriggeredSendApplication>(vehicle->GetApplication(1))->Send(10);
+            // the index '0' here is because the TriggeredSendApplication is the first application installed in main
+            DynamicCast<TriggeredSendApplication>(vehicle->GetApplication(0))->Send(3); // broadcast 3 packets
+            NS_LOG_INFO("At time " << Simulator::Now().As(Time::S) << ", Node " << i << " sent a broadcast");
         }
 
-        SetValue(i, std::to_string(m_count[i]));
+        SetValue(i, std::to_string(m_count[i])); // update the received broadcast count
     }
-    SendResponse();
+    SendResponse(); // format and send a response based on the most recent SetValue
 }
 
 void
 ReportMobility(Ptr<const MobilityModel> mobility)
 {
-    NS_LOG_INFO("At time " << Simulator::Now().As(Time::S)
+    NS_LOG_DEBUG("At time " << Simulator::Now().As(Time::S)
         << ", Node " << mobility->GetObject<Node>()->GetId()
         << ", Position " << mobility->GetPosition()
         << ", Velocity " << mobility->GetVelocity());
@@ -137,86 +159,90 @@ ReportMobility(Ptr<const MobilityModel> mobility)
 int
 main(int argc, char* argv[])
 {
-    bool enableLogging = true;
+    bool verboseLogs            = false;
+    uint16_t numberOfNodes      = 3;
+    uint16_t serverPort         = 8000;
+    std::string serverAddress   = "127.0.0.1";
 
     CommandLine cmd(__FILE__);
-    cmd.AddValue("logging", "Enable/disable detailed output logs (default=true)", enableLogging);
+    cmd.AddValue("verbose", "Enable/disable detailed log output", verboseLogs);
+    cmd.AddValue("numberOfNodes", "Number of vehicle nodes to simulate", numberOfNodes);
+    cmd.AddValue("serverPort", "Port number of the UDP Server", serverPort);
+    cmd.AddValue("serverAddress", "Address of the UDP Server", serverAddress);
     cmd.Parse(argc, argv);
 
-    if (enableLogging)
+    Time::SetResolution(Time::NS); // timestamp has nanosecond resolution
+
+    if (verboseLogs)
     {
-        LogComponentEnable("Gateway", LOG_LEVEL_ALL);
-        LogComponentEnable("GatewayVehicleExample", LOG_LEVEL_INFO);
+        LogComponentEnable("Gateway", LOG_LEVEL_INFO);
+        LogComponentEnable("SimpleGateway", LOG_LEVEL_ALL);
+    }
+    else
+    {
+        LogComponentEnable("Gateway", LOG_LEVEL_INFO);
+        LogComponentEnable("SimpleGateway", LOG_LEVEL_INFO);
     }
 
-    Time::SetResolution(Time::NS);
-
     NodeContainer vehicles;
-    vehicles.Create(3);
+    vehicles.Create(numberOfNodes);
+    NS_LOG_DEBUG("Creating " << numberOfNodes << " nodes to represent vehicles");
 
+    // generate a list of initial positions for the mobility models
     Ptr<ListPositionAllocator> positionAllocator = CreateObject<ListPositionAllocator>();
-    positionAllocator->Add(Vector(0, 0, 0));
-    positionAllocator->Add(Vector(0, 1, 0));
-    positionAllocator->Add(Vector(0, 2, 0));
+    for (uint16_t i = 0; i < numberOfNodes; i++)
+    {
+        positionAllocator->Add(Vector(0, i, 0)); // to prevent duplicate positions (which cause crashes)
+    }
 
+    // install the external mobility model
     MobilityHelper mobility;
     mobility.SetMobilityModel("ns3::ExternalMobilityModel");
     mobility.SetPositionAllocator(positionAllocator);
     mobility.Install(vehicles);
 
+    // install an Ethernet-like bus network
     CsmaHelper csma;
     csma.SetChannelAttribute("DataRate", StringValue("100Mbps"));
+    NetDeviceContainer devices = csma.Install(vehicles);
 
-    NetDeviceContainer devices;
-    devices = csma.Install(vehicles);
-
+    // install an IP network stack
     InternetStackHelper stack;
     stack.Install(vehicles);
 
+    // allocate IPv4 Addresses from 192.168.1.0/24 
     Ipv4AddressHelper address;
     address.SetBase("192.168.1.0", "255.255.255.0");
-    
-    Ipv4InterfaceContainer interfaces;
-    interfaces = address.Assign(devices);
+    Ipv4InterfaceContainer interfaces = address.Assign(devices);
 
     const Ipv4Address broadcastAddress("192.168.1.255");
-    const Time timeStart = Seconds(1.0);
-    const Time timeStop  = Seconds(10.0);
-    const uint16_t port  = 8000;
+    const uint16_t applicationPort = 8000;
+    SimpleGateway gateway(vehicles);
 
-    const std::string gatewayAddress = "127.0.0.1";
-    const uint16_t gatewayPort = 8000;
-
-    GatewayImplementation gateway(vehicles);
-
+    // install the applications
     for (uint32_t i = 0; i < vehicles.GetN(); i++)
     {
         Ptr<Node> vehicle = vehicles.Get(i);
 
-        std::ostringstream addressStream;
-        addressStream << interfaces.GetAddress(i);
-
+        // call ReportMobility when the external mobility model reports a CourseChange
         Ptr<ExternalMobilityModel> mobilityModel = vehicle->GetObject<ExternalMobilityModel>();
         mobilityModel->TraceConnectWithoutContext("CourseChange", MakeCallback(&ReportMobility));
 
-        PacketSinkHelper serverHelper ("ns3::UdpSocketFactory", InetSocketAddress(Ipv4Address::GetAny(), port));
-        ApplicationContainer serverApps = serverHelper.Install(vehicle);
-        serverApps.Get(0)->TraceConnect("Rx", std::to_string(i), MakeCallback(&GatewayImplementation::HandleReceive, &gateway));
-        serverApps.Start(timeStart);
-        //serverApps.Stop(timeStop);
+        // install a triggered send application that can be triggered to broadcast messages to the bus
+        TriggeredSendHelper sendHelper("ns3::UdpSocketFactory", InetSocketAddress(broadcastAddress, applicationPort));
+        sendHelper.SetAttribute("PacketInterval", TimeValue(MilliSeconds(100)));
+        ApplicationContainer clientApps = sendHelper.Install(vehicle);
+        clientApps.Start(Time(0));
 
-        TriggeredSendHelper clientHelper ("ns3::UdpSocketFactory", InetSocketAddress(broadcastAddress, port));
-        clientHelper.SetAttribute("PacketSize", UintegerValue(1024));
-        clientHelper.SetAttribute("PacketInterval", TimeValue(MilliSeconds(100)));
-
-        ApplicationContainer clientApps = clientHelper.Install(vehicle);
-        clientApps.Start(timeStart);
-        //clientApps.Stop(timeStop);
+        // install a packet sink that calls HandleReceive when it receives a broadcasted message
+        PacketSinkHelper sinkHelper("ns3::UdpSocketFactory", InetSocketAddress(Ipv4Address::GetAny(), applicationPort));
+        ApplicationContainer serverApps = sinkHelper.Install(vehicle);
+        serverApps.Get(0)->TraceConnect("Rx", std::to_string(i), MakeCallback(&SimpleGateway::HandleReceive, &gateway));
+        serverApps.Start(Time(0));
     }
 
-    gateway.Connect(gatewayAddress, gatewayPort); // server must be running before this line (or error)
+    gateway.Connect(serverAddress, serverPort); // server must be running before this line (or error)
 
-    //Simulator::Stop(timeStop);
     Simulator::Run();
     Simulator::Destroy();
 
