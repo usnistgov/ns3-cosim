@@ -319,8 +319,8 @@ Gateway::ForwardUp()
     try
     {
         const std::string & seconds = values.at(0);     // int32 represented as string
-        const std::string & nanoseconds = values.at(1); // int32 represented as string
-        timestamp = Seconds(std::stoi(seconds)) + NanoSeconds(std::stoi(nanoseconds));
+        const std::string & nanoseconds = values.at(1); // uint32 represented as string
+        timestamp = Seconds(std::stoi(seconds)) + NanoSeconds(std::stol(nanoseconds));
         NS_LOG_DEBUG("received time: " << timestamp);
     }
     catch (std::exception & e)

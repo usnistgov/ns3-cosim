@@ -21,15 +21,68 @@ The following new classes are provided:
 
 # Gateway Architecture
 
-(will be updated)
+The gateway is an abstract class with two pure virtual functions (`Gateway::DoInitialize` and `Gateway::DoUpdate`). It
+maintains a TCP/IP socket connection to a remote server, defines a simple string-based application layer protocol for
+data exchange, and synchronizes the ns-3 simulation time with time values received from the remote server.
+
+A brief introduction to the gateway architecture is presented in the sections below. Before using the gateway, refer to
+its [documentation](model/gateway.h) and the simple gateway example introduced later in this document.
 
 ## Data Exchange
 
-(will be updated)
+The following sequence diagram shows how a single message is processed:
+
+![Gateway Sequence Diagram](sequence-diagram.svg)
+
+The remote server sends a message to the gateway. This message is a string, with the format:
+
+    time(seconds),time(nanoseconds),received_value_1,...,received_value_n;
+
+This message contains two delimiters: a field delimiter (`,`) that separates the values, and a message delimiter (`;`)
+that indicates the end-of-message. These delimiters are the C++ `std::string` type and are configured when the gateway
+is constructed. The default values are a space (for the field) and `\r\n` (for the message).
+
+The `time(seconds)` and `time(nanoseconds)` values are considered the message header, and are stripped from the message
+before any further processing. These values represent the seconds component (signed 32-bit integer) and the nanoseconds
+component (unsigned 32-bit integer in the range [0,10e9)) of a single time value. This format was selected to match
+the Robot Operating System (ROS2) [Time](https://docs.ros2.org/latest/api/builtin_interfaces/msg/Time.html) format.
+
+When the gateway receives a new message, it schedules the `Gateway::HandleUpdate` function to be executed at the
+`ns3::Time` equivalent of the message header. This handle update function delegates processing the message to the
+user-defined `DoUpdate` function. The rest of the sequence diagram is a suggested implementation of `DoUpdate`.
+
+The gateway will send a response when `Gateway::SendRespone` is called. This message is a string, with the format:
+
+    value_1,value_2,...,value_m;
+
+This message re-uses the same field delimiter (`,`) and end-of-message delimiter (`;`) as above. It will always contain
+`m` values, where `m` is specified in the gateway constructor. Unless otherwise set, these values will default to an
+empty string. The individual values can be set using the `Gateway::SetValue` function. Once set, each element retains
+its value between consecutive calls to `Gateway::SendResponse`.
 
 ## Time Management
 
-(will be updated)
+This section gives a coarse summary of the elements of time management relevant to using the gateway.
+
+When `Gateway::Connect` is called, ns-3 time progression is immediately paused at the current simulation time forever.
+The function `Gateway::WaitForNextUpdate` is scheduled to execute now, and this function recursively schedules itself
+to execute now (forever). Time progression cannot resume until the scheduled `WaitForNextUpdate` event is cancelled.
+
+When the gateway receives a new message from the remote server (see Data Exchange above), it cancels the currently
+scheduled `WaitForNextUpdate` event and re-schedules it to execute at the time indicated in the received time stamp.
+This allows ns-3 to simulate up to the time of the last received message, after which time progression will once again
+pause until a new time stamp is received. This creates a leader-follower approach to time synchronization, where the
+remote server acting as the leader controls ns-3 time progression through the sending of time stamped messages.
+
+Note that, when implementing a remote server, the gateway operates on time relative to the first received time stamp.
+Suppose that `Gateway::Connect` is called at an ns-3 simulation time of 5 seconds, and the first received message from
+the remote server has the time stamp (10 seconds, 0 nanoseconds). This first message received from the remote server is
+used to initialize the gateway, and does not cancel the `WaitForNevetUpdate` event. If the next message received from
+the remote server has a time stamp of (11 seconds, 0 nanoseconds), ns-3 will compute the time difference between the
+time stamps and advance 1 second to an internal ns-3 simulation time of 6 seconds.
+
+Until this documentation is revised with additional detail on time management, the simple gateway example is a good
+reference to better understand time management.
 
 # Installation
 
