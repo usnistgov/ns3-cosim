@@ -214,7 +214,7 @@ command line arguments (and to see the list of possible arguments), use the form
 
 This repository includes modified ns-3 source code distributed under the GNU General Public License, Version 2.
 All modified files include their original attributions in a comment header, and their respective licensing statements
-can be found in the [LICENSES](licenses) directory.
+can be found in the [LICENSES](LICENSES/) directory.
 
 ## Contact Information
 
