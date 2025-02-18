@@ -50,12 +50,6 @@ Transmit(Ptr<Application> sendingApplication)
 }
 
 void
-DelayedTransmit(Ptr<Application> sendingApplication)
-{
-    Simulator::ScheduleNow(&Transmit, sendingApplication);
-}
-
-void
 PacketSinkTrace(Ptr<const Packet> pkt, const Address &addr)
 {
     NS_LOG_INFO("\t received at time " << Simulator::Now().As(Time::S));
@@ -98,7 +92,7 @@ main(int argc, char* argv[])
     ApplicationContainer serverApps = server.Install(nodes.Get(1)); // N1 is the server
     serverApps.Get(0)->TraceConnectWithoutContext("Rx", MakeCallback(&PacketSinkTrace));
     serverApps.Start(Seconds(1.0));
-    serverApps.Stop(Seconds(12.0));
+    serverApps.Stop(Seconds(10.0));
 
     // Create a triggered send application for the client with a 200 ms interval between sent packets
     TriggeredSendHelper client("ns3::UdpSocketFactory", InetSocketAddress(serverAddress, 8000));
@@ -124,23 +118,9 @@ main(int argc, char* argv[])
     Simulator::Schedule(Seconds(6.9), &Transmit, clientApps.Get(0));
 
     // Case 4: the first send is interrupted at the exact time its next packet should be sent
-    // The outcome for this case depends on how the ns-3 scheduler selects which event to execute next
-    // If the first send is selected, packets will be sent at {8.0, 8.2, 8.4} and {8.6, 8.8, 9.0, 9.2, 9.4}
-    // If the second send is selected, packets will be sent at {8.0, 8.2} and {8.4, 8.6, 8.8, 9.0, 9.2}
-    //
-    // For this example (using the v2x-v1.1 tag of ns-3), the result will be the second outcome:
-    //  1) the ns-3 scheduler appears to be FIFO so the first scheduled event will be selected
-    //  2) the event associated with the second send is scheduled at time 0 (the line below)
-    //  3) the event associated with the first send is scheduled at time 8.2 (during SendPacket)
+    // For this case, packets will be sent at {8.0, 8.2, 8.4} and {8.6, 8.8, 9.0, 9.2, 9.4}
     Simulator::Schedule(Seconds(8.0), &Transmit, clientApps.Get(0));
     Simulator::Schedule(Seconds(8.4), &Transmit, clientApps.Get(0));
-
-    // Case 5: for fun, this shows the other outcome of Case 4 using some scheduler magic
-    // For this case, packets will be sent at {10.0, 10.2, 10.4} and {10.6, 10.8, 11.0, 11.2, 11.4}
-    //  1) the event associated with the first send is scheduled at time 10.2 (during SendPacket)
-    //  2) the event associated with the second send is scheduled at time 10.4 (in DelayedTransmit)
-    Simulator::Schedule(Seconds(10.0), &Transmit, clientApps.Get(0));
-    Simulator::Schedule(Seconds(10.4), &DelayedTransmit, clientApps.Get(0));
 
     Simulator::Run();
     Simulator::Destroy();
