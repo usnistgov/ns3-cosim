@@ -51,7 +51,7 @@ When the gateway receives a new message, it schedules the `Gateway::HandleUpdate
 `ns3::Time` equivalent of the message header. This handle update function delegates processing the message to the
 user-defined `DoUpdate` function. The rest of the sequence diagram is a suggested implementation of `DoUpdate`.
 
-The gateway will send a response when `Gateway::SendRespone` is called. This message is a string, with the format:
+The gateway will send a response when `Gateway::SendResponse` is called. This message is a string, with the format:
 
     value_1,value_2,...,value_m;
 
@@ -77,7 +77,7 @@ remote server acting as the leader controls ns-3 time progression through the se
 Note that, when implementing a remote server, the gateway operates on time relative to the first received time stamp.
 Suppose that `Gateway::Connect` is called at an ns-3 simulation time of 5 seconds, and the first received message from
 the remote server has the time stamp (10 seconds, 0 nanoseconds). This first message received from the remote server is
-used to initialize the gateway, and does not cancel the `WaitForNevetUpdate` event. If the next message received from
+used to initialize the gateway, and does not cancel the `WaitForNextUpdate` event. If the next message received from
 the remote server has a time stamp of (11 seconds, 0 nanoseconds), ns-3 will compute the time difference between the
 time stamps and advance 1 second to an internal ns-3 simulation time of 6 seconds.
 
@@ -218,7 +218,7 @@ can be found in the [LICENSES](licenses) directory.
 
 ## Contact Information
 
-This repository is mainted by:
+This repository is maintained by:
   - Thomas Roth (@tpr1)
 
 ## Citation Information
