@@ -9,7 +9,7 @@ using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("NistVehicleGateway");
 
-void NistVehicleGateway::initialize(const char *address, int portNum, ns3::ApplicationContainer onOffApplications, netsimulyzer::NodeConfigurationContainer configurations) {
+void NistVehicleGateway::initialize(const char *address, int portNum, ns3::ApplicationContainer onOffApplications, netsimulyzer::NodeConfigurationContainer configurations, int numPackets) {
     Gateway::initialize(address, portNum);
 
     onOffContainer = onOffApplications;
@@ -29,6 +29,8 @@ void NistVehicleGateway::initialize(const char *address, int portNum, ns3::Appli
     receivedNanosec = -1;
     lastReceivedSec = -1;
     lastReceivedNanosec = -1;
+
+    numberOfPackets = numPackets;
 
     receivedData.resize(9); // {position_x, position_y, position_z, orientation_x, orientation_y, orientation_z, velocity, brake_percent, remote_stop_ms}
 
@@ -129,9 +131,9 @@ void NistVehicleGateway::handleUpdate() {
     if (transmitOnBrake) {
         if (!braking && brake_torque > 0) {
             NS_LOG_INFO("DETECTED BRAKING - Starting BSM Transmission");
-            Ptr<OnOffApplication> tempOnOffHolder = DynamicCast<OnOffApplication>(onOffContainer.Get(0));
+            Ptr<TriggeredSendApplication> tempOnOffHolder = DynamicCast<TriggeredSendApplication>(onOffContainer.Get(0));
             if (tempOnOffHolder) {
-                tempOnOffHolder->StartNow();
+                tempOnOffHolder->Send(numberOfPackets);
             }
 
             Ptr<netsimulyzer::NodeConfiguration> vehicleConfiguration = configurationContainer.Get(0);
@@ -190,9 +192,9 @@ void NistVehicleGateway::resetNodeColor(int nodeIndex) {
 void NistVehicleGateway::sendRemoteStop() {
     NS_LOG_FUNCTION ("sendRemoteStop @ " << Simulator::Now());
 
-    Ptr<OnOffApplication> tempOnOffHolder = DynamicCast<OnOffApplication>(onOffContainer.Get(1));
+    Ptr<TriggeredSendApplication> tempOnOffHolder = DynamicCast<TriggeredSendApplication>(onOffContainer.Get(1));
     if (tempOnOffHolder) {
-        tempOnOffHolder->StartNow();
+        tempOnOffHolder->Send(numberOfPackets);
     } else {
         NS_LOG_ERROR("unable to find OnOffApplication to transmit remote stop");
     }

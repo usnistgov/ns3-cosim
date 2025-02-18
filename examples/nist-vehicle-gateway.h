@@ -13,13 +13,13 @@
 #include "ns3/ptr.h"
 #include "ns3/packet.h"
 
-#include "ns3/onoff-application.h"
+#include "ns3/triggered-send-application.h"
 #include <ns3/netsimulyzer-module.h>
 
 using namespace ns3;
 class NistVehicleGateway : public ns3::Gateway {
     public:
-        void initialize(const char *address, int portNum, ns3::ApplicationContainer onOffApplications, netsimulyzer::NodeConfigurationContainer configurations);
+        void initialize(const char *address, int portNum, ns3::ApplicationContainer onOffApplications, netsimulyzer::NodeConfigurationContainer configurations, int numPackets);
 
         void setTransmitOnBrake(bool isEnabled);
 
@@ -53,6 +53,8 @@ class NistVehicleGateway : public ns3::Gateway {
         int lastReceivedSec;
         unsigned int receivedNanosec;
         unsigned int lastReceivedNanosec;
+
+        int numberOfPackets;
 
         vector<double> receivedData;        
 };
