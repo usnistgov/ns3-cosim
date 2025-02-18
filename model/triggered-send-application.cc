@@ -30,7 +30,6 @@ namespace ns3
 {
 
 NS_LOG_COMPONENT_DEFINE("TriggeredSendApplication");
-
 NS_OBJECT_ENSURE_REGISTERED(TriggeredSendApplication);
 
 TypeId
