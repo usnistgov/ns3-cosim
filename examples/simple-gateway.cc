@@ -192,7 +192,7 @@ main(int argc, char* argv[])
     Ptr<ListPositionAllocator> positionAllocator = CreateObject<ListPositionAllocator>();
     for (uint16_t i = 0; i < numberOfNodes; i++)
     {
-        positionAllocator->Add(Vector(0, i, 0)); // to prevent duplicate positions (which cause crashes)
+        positionAllocator->Add(Vector(0, i, 0));
     }
 
     // install the external mobility model

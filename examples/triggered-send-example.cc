@@ -58,10 +58,6 @@ PacketSinkTrace(Ptr<const Packet> pkt, const Address &addr)
 int
 main(int argc, char* argv[])
 {
-    CommandLine cmd(__FILE__);
-    cmd.Parse(argc, argv);
-
-    Time::SetResolution(Time::NS);
     LogComponentEnable("TriggeredSendExample", LOG_LEVEL_INFO);
     LogComponentEnable("TriggeredSendApplication", LOG_LEVEL_INFO);
 
