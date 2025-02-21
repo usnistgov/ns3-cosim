@@ -223,7 +223,9 @@ This repository is maintained by:
 
 ## Citation Information
 
-(will be updated when available)
+You can cite this software in technical publications as:
+
+`Thomas Roth (2025), Gateway for Co-Simulation using ns-3, National Institute of Standards and Technology, https://doi.org/10.18434/mds2-3738`
 
 ## References
 
