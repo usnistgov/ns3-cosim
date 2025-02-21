@@ -14,6 +14,8 @@ with periodic synchronization at runtime for data exchange. This is more dynamic
 pre-recorded data, as the performance of the communications network in ns-3 can affect the on-going traffic simulation
 in SUMO and vice versa.
 
+![Gateway Architecture Diagram](gateway.png)
+
 The following new classes are provided:
   - a [gateway](model/gateway.h) for integrating ns-3 with other software using a local TCP/IP socket connection
   - a [triggered send application](model/triggered-send-application.h) that lets external code broadcast messages
