@@ -18,6 +18,13 @@ build_lib_example(
 )
 
 build_lib_example(
+    NAME nr-v2x-example
+    SOURCE_FILES nr-v2x-example.cc
+    LIBRARIES_TO_LINK
+        ${libnr}
+)
+
+build_lib_example(
     NAME simple-gateway
     SOURCE_FILES simple-gateway.cc
     LIBRARIES_TO_LINK
