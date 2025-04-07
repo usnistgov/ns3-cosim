@@ -98,6 +98,7 @@ This code was tested using:
   - Ubuntu 22.04
   - [ns-3-dev-v2x-v1.1](https://gitlab.com/cttc-lena/ns-3-dev/-/tree/ns-3-dev-v2x-v1.1)
   - [nr-v2x-v1.1](https://gitlab.com/cttc-lena/nr/-/tree/v2x-1.1)
+  - [netsimulyzer-v1.0.13](https://github.com/usnistgov/NetSimulyzer-ns3-module/tree/v1.0.13)
 
 These instructions require:
   - cmake 3.13 (or newer)
@@ -123,7 +124,7 @@ Run the following commands, ignoring any comments (lines starting with #):
     # optional (for V2X examples using sidelink)
     git clone --branch v2x-1.1 https://gitlab.com/cttc-lena/nr.git
     # optional (for visualization of network models)
-    git clone https://github.com/usnistgov/NetSimulyzer-ns3-module netsimulyzer
+    git clone --branch v1.0.13 https://github.com/usnistgov/NetSimulyzer-ns3-module netsimulyzer
 
 Ensure the directory structure matches, exactly:
 
