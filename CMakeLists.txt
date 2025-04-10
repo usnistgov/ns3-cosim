@@ -15,3 +15,16 @@ build_lib(
         ${libapplications}
         ${libmobility}
 )
+
+build_lib_example(
+    NAME dataspeed-gateway
+    SOURCE_FILES dataspeed/dataspeed-gateway.cc
+    LIBRARIES_TO_LINK
+        ${libapplications}
+        ${libcore}
+        ${libcsma}
+        ${libinternet}
+        ${libmobility}
+        ${libnetwork}
+        ${libns3-cosim}
+)
