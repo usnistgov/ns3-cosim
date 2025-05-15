@@ -50,9 +50,9 @@ Transmit(Ptr<Application> sendingApplication)
 }
 
 void
-PacketSinkTrace(Ptr<const Packet> pkt, const Address &addr)
+PacketSinkTrace(Ptr<const Packet> pkt, const Address &from, const Address &to, const SeqTsSizeHeader &header)
 {
-    NS_LOG_INFO("\t received at time " << Simulator::Now().As(Time::S));
+    NS_LOG_INFO("\t received packet " << header.GetSeq() << " at time " << Simulator::Now().As(Time::S));
 }
 
 int
@@ -84,9 +84,10 @@ main(int argc, char* argv[])
 
     // Create a packet sink application for the server using PacketSinkTrace as the callback when packets are received
     PacketSinkHelper server("ns3::UdpSocketFactory", InetSocketAddress(serverAddress, 8000));
+    server.SetAttribute("EnableSeqTsSizeHeader", BooleanValue(true));
 
     ApplicationContainer serverApps = server.Install(nodes.Get(1)); // N1 is the server
-    serverApps.Get(0)->TraceConnectWithoutContext("Rx", MakeCallback(&PacketSinkTrace));
+    serverApps.Get(0)->TraceConnectWithoutContext("RxWithSeqTsSize", MakeCallback(&PacketSinkTrace));
     serverApps.Start(Seconds(1.0));
     serverApps.Stop(Seconds(10.0));
 
@@ -94,6 +95,7 @@ main(int argc, char* argv[])
     TriggeredSendHelper client("ns3::UdpSocketFactory", InetSocketAddress(serverAddress, 8000));
     client.SetAttribute("PacketSize", UintegerValue(1024));
     client.SetAttribute("PacketInterval", TimeValue(MilliSeconds(200)));
+    client.SetAttribute("EnableSeqTsSizeHeader", BooleanValue(true));
 
     ApplicationContainer clientApps = client.Install(nodes.Get(0)); // N0 is the client
     clientApps.Start(Seconds(2.0));

@@ -16,11 +16,13 @@
 
 #include "triggered-send-application.h"
 
+#include "ns3/boolean.h"
 #include "ns3/inet-socket-address.h"
 #include "ns3/inet6-socket-address.h"
 #include "ns3/log.h"
 #include "ns3/node.h"
 #include "ns3/packet-socket-address.h"
+#include "ns3/seq-ts-size-header.h"
 #include "ns3/simulator.h"
 #include "ns3/trace-source-accessor.h"
 #include "ns3/udp-socket-factory.h"
@@ -59,6 +61,12 @@ TriggeredSendApplication::GetTypeId()
                 MakeTypeIdAccessor(&TriggeredSendApplication::m_socketTypeId),
                 MakeTypeIdChecker()) // does not check if the type derives from ns3::SocketFactory
             .AddAttribute(
+                "EnableSeqTsSizeHeader",
+                "Enable use of SeqTsSizeHeader for sequence number and timestamp",
+                BooleanValue(false),
+                MakeBooleanAccessor(&TriggeredSendApplication::m_useHeader),
+                MakeBooleanChecker())
+            .AddAttribute(
                 "Tos",
                 "The Type of Service used when sending IPv4 packets.",
                 UintegerValue(0),
@@ -92,7 +100,8 @@ TriggeredSendApplication::GetTypeId()
 TriggeredSendApplication::TriggeredSendApplication()
     : m_socket(nullptr),
       m_connected(false),
-      m_packetCount(0)
+      m_packetCount(0),
+      m_sequenceNumber(0)
 {
     NS_LOG_FUNCTION(this);
 }
@@ -264,7 +273,22 @@ TriggeredSendApplication::SendPacket()
 
     if (m_packetCount > 0)
     {
-        Ptr<Packet> packet = Create<Packet>(m_packetSize);
+        Ptr<Packet> packet;
+
+        if (m_useHeader)
+        {
+            SeqTsSizeHeader header;
+            header.SetSeq(m_sequenceNumber++);
+            header.SetSize(m_packetSize);
+
+            NS_ABORT_IF(m_packetSize < header.GetSerializedSize());
+            packet = Create<Packet>(m_packetSize - header.GetSerializedSize());
+            packet->AddHeader(header);
+        }
+        else
+        {
+            packet = Create<Packet>(m_packetSize);
+        }
 
         int bytesSent = m_socket->Send(packet);
         if ((unsigned)bytesSent == m_packetSize)

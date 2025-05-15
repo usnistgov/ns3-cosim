@@ -112,11 +112,13 @@ class TriggeredSendApplication : public Application
         TypeId m_socketTypeId;      //!< Type ID of a ns3::SocketFactory
         Ptr<Socket> m_socket;       //!< Socket used to send packets
         bool m_connected;           //!< Flag for the socket connect status
+        bool m_useHeader;           //!< If true, send packets with a header
         uint8_t m_tos;              //!< Type of Service for IPv4 connections
 
         Time m_packetInterval;      //!< Time interval between sending two packets
         uint32_t m_packetSize;      //!< Size in bytes of the generated packets
         uint32_t m_packetCount;     //!< Remaining number of packets to send
+        uint32_t m_sequenceNumber;  //!< Next sequence number for the header
 
         EventId m_sendPacketEvent;  //!< Event ID for the next scheduled send packet event
 
