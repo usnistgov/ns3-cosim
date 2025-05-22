@@ -41,7 +41,7 @@ from transforms3d.euler import quat2euler
 from rclpy.node import Node
 from rcl_interfaces.msg import IntegerRange, ParameterDescriptor, ParameterType
 
-from ds_dbw_msgs.msg import BrakeInfo, VehicleVelocity
+from ds_dbw_msgs.msg import BrakeInfo
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Bool
 
@@ -132,15 +132,14 @@ class DataSpeedBridge(Node):
         # Create Subscriptions
         self.create_subscription(Odometry, '/novatel/odom', self.callback_odometry, 10)
         self.create_subscription(BrakeInfo, '/vehicle/brake/info', self.callback_brake, 10)
-        self.create_subscription(VehicleVelocity, '/vehicle/vehicle_velocity', self.callback_velocity, 10)
         self.create_subscription(Bool, '/ds_bridge/terminate', self.callback_terminate, 10)
 
         # Initialize Variables
         self.next_time = None
         self.position = [0,0,0]
         self.orientation = [0,0,0]
+        self.linearTwist = [0,0,0]
         self.brake_torque = 0.0
-        self.velocity = 0.0
 
     def run(self):
         address = self.get_parameter('ip_address').get_parameter_value().string_value
@@ -173,6 +172,9 @@ class DataSpeedBridge(Node):
         self.orientation = [math.degrees(roll), math.degrees(pitch), math.degrees(yaw)]
         self.get_logger().debug("received orientation %s at time %s" % (self.orientation, timestamp))
 
+        self.linearTwist = [message.twist.twist.linear.x, message.twist.twist.linear.y, message.twist.twist.linear.z]
+        self.get_logger().debug("received linear twist %s at time %s" % (self.linearTwist, timestamp))
+
     def callback_brake(self, message):
         timestamp = TimeStamp(message.header.stamp.sec, message.header.stamp.nanosec)
 
@@ -180,14 +182,6 @@ class DataSpeedBridge(Node):
         
         self.brake_torque = message.brake_torque_request
         self.get_logger().debug("received brake torque %s at time %s" % (self.brake_torque, timestamp))
-
-    def callback_velocity(self, message):
-        timestamp = TimeStamp(message.header.stamp.sec, message.header.stamp.nanosec)
-
-        self.__handle_timestamp(timestamp)
-
-        self.velocity = message.vehicle_velocity_propulsion
-        self.get_logger().debug("received velocity %s at time %s" % (self.velocity, timestamp))
 
     def callback_terminate(self, message):
         if message.data:
@@ -203,23 +197,17 @@ class DataSpeedBridge(Node):
             self.orientation[0],
             self.orientation[1],
             self.orientation[2],
-            self.velocity,
+            self.linearTwist[0],
+            self.linearTwist[1],
+            self.linearTwist[2],
             self.brake_torque
         ]
         packet_string = str(self.next_time.get_seconds()) + ' ' + str(self.next_time.get_nanoseconds()) + ' '
         packet_string += ' '.join(str(d) for d in packet_data)
         packet_string += "\r\n"
 
-        # Send data to ns-3 and receive the response
         self.client_socket.send(packet_string.encode())
         self.get_logger().debug("sent packet: %s" % packet_string)
-        #response = self.client_socket.recv(4096).decode()
-        #self.get_logger().info("received response: %s" % response)
-
-        #if response == '1':
-        #    stop_msg = String()
-        #    stop_msg.data = 'stop'
-        #    self.stop_publisher.publish(stop_msg)
 
         self.next_time += self.__get_timestep()
         self.get_logger().info("Waiting until clock advances to %s" % self.next_time)
@@ -247,3 +235,4 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
+

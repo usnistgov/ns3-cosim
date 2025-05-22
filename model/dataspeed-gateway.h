@@ -37,6 +37,9 @@
 #include "ns3/node.h"
 #include "ns3/ptr.h"
 
+#include "ns3/external-mobility-model.h"
+#include "ns3/triggered-send-application.h"
+
 namespace ns3
 {
 
@@ -44,10 +47,22 @@ class DataspeedGateway : public Gateway
 {
     public:
         DataspeedGateway(Ptr<Node> vehicleNode);
+
+        void SetIgnoreHeight(bool value);
+        void SetReferencePosition(Vector position);
+        void SetReferenceOrientation(Vector orientation);
     private:
         virtual void DoInitialize(const std::vector<std::string> & data);
 
         virtual void DoUpdate(const std::vector<std::string> & data);
+
+        Ptr<ExternalMobilityModel> m_mobility;
+        Ptr<TriggeredSendApplication> m_application;
+
+        bool m_isBraking;
+        bool m_ignoreHeight;
+        Vector m_referencePosition;
+        Vector m_referenceOrientation;
 };
 
 } // namespace ns3

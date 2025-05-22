@@ -30,11 +30,17 @@
  * Author: Thomas Roth <thomas.roth@nist.gov>
 */
 
+#include "ns3/applications-module.h"
 #include "ns3/core-module.h"
+#include "ns3/csma-module.h"
+#include "ns3/internet-module.h"
 #include "ns3/mobility-module.h"
+#include "ns3/network-module.h"
 
 #include "ns3/dataspeed-gateway.h"
 #include "ns3/external-mobility-model.h"
+#include "ns3/triggered-send-application.h"
+#include "ns3/triggered-send-helper.h"
 
 using namespace ns3;
 
@@ -49,7 +55,7 @@ main(int argc, char* argv[])
     cmd.AddValue("serverPort", "Port Number of the server", serverPort);
     cmd.Parse(argc, argv);
 
-    LogComponentEnable("DataspeedGateway", LOG_LEVEL_INFO);
+    LogComponentEnable("DataspeedGateway", LOG_LEVEL_DEBUG);
 
     Ptr<Node> vehicle = CreateObject<Node>();
 
@@ -64,11 +70,31 @@ main(int argc, char* argv[])
     mobilityHelper.SetPositionAllocator(positionAllocator);
     mobilityHelper.Install(nodes);
 
+    CsmaHelper csma;
+    csma.SetChannelAttribute("DataRate", StringValue("100Mbps"));
+    NetDeviceContainer devices = csma.Install(nodes);
+
+    InternetStackHelper stack;
+    stack.Install(nodes);
+
+    Ipv4AddressHelper address;
+    address.SetBase("192.168.1.0", "255.255.255.0");
+    Ipv4InterfaceContainer interfaces = address.Assign(devices);
+
+    const Ipv4Address broadcastAddress("192.168.1.255");
+    const uint16_t applicationPort = 8000;
+    TriggeredSendHelper sendHelper("ns3::UdpSocketFactory", InetSocketAddress(broadcastAddress, applicationPort));
+    sendHelper.SetAttribute("PacketInterval", TimeValue(MilliSeconds(100)));
+    ApplicationContainer clientApps = sendHelper.Install(nodes);
+    clientApps.Start(Time(0));
+
     DataspeedGateway gateway(vehicle);
+    gateway.SetIgnoreHeight(true);
+    gateway.SetReferenceOrientation(Vector(0,0,90));
     gateway.Connect(serverAddress, serverPort);
 
     Simulator::Run();
     Simulator::Destroy();
-    
+
     return 0;
 }

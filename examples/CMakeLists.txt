@@ -21,8 +21,12 @@ build_lib_example(
     NAME visualization-example
     SOURCE_FILES visualization-example.cc
     LIBRARIES_TO_LINK
+        ${libapplications}
         ${libcore}
+        ${libcsma}
+        ${libinternet}
         ${libmobility}
+        ${libnetwork}
 )
 
 build_lib_example(

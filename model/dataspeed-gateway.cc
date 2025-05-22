@@ -37,21 +37,86 @@ namespace ns3
 
 NS_LOG_COMPONENT_DEFINE("DataspeedGateway");
 
-DataspeedGateway::DataspeedGateway(Ptr<Node> vehicleNode)
-    : Gateway(8)
+DataspeedGateway::DataspeedGateway(Ptr<Node> vehicleNode):
+    Gateway(10),
+    m_application(NULL),
+    m_ignoreHeight(false),
+    m_referencePosition(Vector(0,0,0)),
+    m_referenceOrientation(Vector(0,0,0))
 {
+    m_mobility = vehicleNode->GetObject<ExternalMobilityModel>();
+    NS_ASSERT_MSG(m_mobility, "Node passed to Dataspeed Gateway has no ExternalMobilityModel");
+
+    for (uint32_t i = 0; i < vehicleNode->GetNApplications(); i++)
+    {
+        Ptr<TriggeredSendApplication> app = DynamicCast<TriggeredSendApplication>(vehicleNode->GetApplication(i));
+
+        if (app)
+        {
+            NS_ASSERT_MSG(!m_application, "Node passed to Dataspeed Gateway has multiple TriggeredSendApplications");
+            m_application = app;
+            NS_LOG_INFO("Dataspeed Gateway found a TriggeredSendApplication - BSM will be broadcast");
+        }
+    }
+}
+
+void
+DataspeedGateway::SetIgnoreHeight(bool value)
+{
+    NS_LOG_FUNCTION(this << value);
+    m_ignoreHeight = value;
+}
+
+void
+DataspeedGateway::SetReferencePosition(Vector position)
+{
+    NS_LOG_FUNCTION(this << position);
+    m_referencePosition = position;
+}
+
+void
+DataspeedGateway::SetReferenceOrientation(Vector orientation)
+{
+    NS_LOG_FUNCTION(this << orientation);
+    m_referenceOrientation = orientation;
 }
 
 void
 DataspeedGateway::DoInitialize(const std::vector<std::string> & data)
 {
-    NS_LOG_INFO("" << data[0]);
+    DoUpdate(data);
 }
 
 void
 DataspeedGateway::DoUpdate(const std::vector<std::string> & data)
 {
-    NS_LOG_INFO("" << data[0]);
+    NS_LOG_FUNCTION(this << data);
+
+    Vector position(std::stoi(data[0]), std::stoi(data[1]), std::stoi(data[2]));
+    Vector orientation(std::stoi(data[3]), std::stoi(data[4]), std::stoi(data[5]));
+    Vector linearTwist(std::stoi(data[6]), std::stoi(data[7]), std::stoi(data[8]));
+    double brake_torque = std::stoi(data[9]);
+
+    position = position - m_referencePosition;
+    m_mobility->SetPosition(position);
+    m_mobility->SetVelocity(linearTwist);
+
+    orientation = orientation - m_referenceOrientation;
+    // TODO: use orientation for visualization
+
+    if (m_application)
+    {
+        if (!m_isBraking && brake_torque > 0)
+        {
+            NS_LOG_INFO("DETECTED BRAKING - Starting BSM Transmission");
+            m_application->Send(10);
+            m_isBraking = true;
+        }
+        else if (m_isBraking && brake_torque == 0)
+        {
+            m_isBraking = false;
+        }
+    }
 }
 
 } // namespace ns3
