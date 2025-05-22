@@ -18,6 +18,14 @@ build_lib_example(
 )
 
 build_lib_example(
+    NAME visualization-example
+    SOURCE_FILES visualization-example.cc
+    LIBRARIES_TO_LINK
+        ${libcore}
+        ${libmobility}
+)
+
+build_lib_example(
     NAME nr-v2x-example
     SOURCE_FILES nr-v2x-example.cc
     LIBRARIES_TO_LINK

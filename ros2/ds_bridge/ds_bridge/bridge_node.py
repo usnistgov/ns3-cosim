@@ -142,6 +142,21 @@ class DataSpeedBridge(Node):
         self.brake_torque = 0.0
         self.velocity = 0.0
 
+    def run(self):
+        address = self.get_parameter('ip_address').get_parameter_value().string_value
+        port = self.get_parameter('port_number').get_parameter_value().integer_value
+
+        # Setup the server socket
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # allow immediate re-use of address if code restarted
+        self.server_socket.bind((address, port))
+        self.server_socket.listen(1)
+
+        # Accept client connection
+        self.get_logger().info("Server at {}:{} waiting for client connection...".format(address, port))
+        self.client_socket, client_address = self.server_socket.accept()
+        self.get_logger().info("accepted client with address {}".format(client_address))
+
     def callback_odometry(self, message):
         timestamp = TimeStamp(message.header.stamp.sec, message.header.stamp.nanosec)
 
@@ -181,6 +196,31 @@ class DataSpeedBridge(Node):
             sys.exit()
 
     def advance_time(self):
+        packet_data = [
+            self.position[0],
+            self.position[1],
+            self.position[2],
+            self.orientation[0],
+            self.orientation[1],
+            self.orientation[2],
+            self.velocity,
+            self.brake_torque
+        ]
+        packet_string = str(self.next_time.get_seconds()) + ' ' + str(self.next_time.get_nanoseconds()) + ' '
+        packet_string += ' '.join(str(d) for d in packet_data)
+        packet_string += "\r\n"
+
+        # Send data to ns-3 and receive the response
+        self.client_socket.send(packet_string.encode())
+        self.get_logger().debug("sent packet: %s" % packet_string)
+        #response = self.client_socket.recv(4096).decode()
+        #self.get_logger().info("received response: %s" % response)
+
+        #if response == '1':
+        #    stop_msg = String()
+        #    stop_msg.data = 'stop'
+        #    self.stop_publisher.publish(stop_msg)
+
         self.next_time += self.__get_timestep()
         self.get_logger().info("Waiting until clock advances to %s" % self.next_time)
 
@@ -199,55 +239,11 @@ def main(args=None):
     rclpy.init(args=args)
 
     ds_bridge = DataSpeedBridge()
-    rclpy.spin(ds_bridge)
+    ds_bridge.run()
 
+    rclpy.spin(ds_bridge)
     ds_bridge.destroy_node()
     rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
-
-
-""" 
-from std_msgs.msg import String
-from rcl_interfaces.msg import SetParametersResult
-
-class DataSpeedNetworkBridge(Node):
-    def __init__(self, timestep_ms, ignore_position_z):
-        # Setup the TCP Server for ns-3
-        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # allow immediate re-use of address if code restarted
-        self.server_socket.bind((IP_ADDRESS, 1111))
-        self.server_socket.listen(1)
-        self.get_logger().info("TCP/IP server at {}:1111 waiting for client connection...".format(IP_ADDRESS))
-        # self.client_socket, client_address = self.server_socket.accept()
-        #self.get_logger().info("accepted client with address {}".format(client_address))
-
-    def advance_time(self):
-        packet_data = [
-            self.next_position.get_x(),
-            self.next_position.get_y(),
-            self.next_position.get_z(),
-            self.next_orientation[0], # x
-            self.next_orientation[1], # y
-            self.next_orientation[2], # z
-            self.next_velocity,
-            self.next_brake_torque]
-        packet_string = str(self.next_time.get_seconds()) + ',' + str(self.next_time.get_nanoseconds()) + '\n'
-        packet_string += ','.join(str(d) for d in packet_data)
-        packet_string += "\r\n"
-
-        # Send data to ns-3 and receive the response
-        # self.client_socket.send(packet_string.encode())
-        self.get_logger().debug("sent packet: %s" % packet_string)
-        # response = self.client_socket.recv(4096).decode()
-        # self.get_logger().info("received response: %s" % response)
-
-        #if response == '1':
-        #    stop_msg = String()
-        #    stop_msg.data = 'stop'
-        #    self.stop_publisher.publish(stop_msg)
-
-        self.next_time += self.__get_timestep()
-        self.get_logger().info("Waiting until clock advances to %s" % self.next_time)
- """
