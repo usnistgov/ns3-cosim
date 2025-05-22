@@ -35,22 +35,17 @@ import rclpy
 import socket
 import sys
 
-from rclpy.node import Node
-from std_msgs.msg import String
-from rcl_interfaces.msg import SetParametersResult
-from transforms3d.euler import quat2euler
 from functools import total_ordering
+from transforms3d.euler import quat2euler
 
-from ds_dbw_msgs.msg import BrakeInfo
-from ds_dbw_msgs.msg import VehicleVelocity
+from rclpy.node import Node
+from rcl_interfaces.msg import IntegerRange, ParameterDescriptor, ParameterType
+
+from ds_dbw_msgs.msg import BrakeInfo, VehicleVelocity
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Bool
 
-# local address
-IP_ADDRESS = "127.0.0.1"
-# NIST Vehicle PC
-#IP_ADDRESS = "192.168.0.10"
-
+# A (second, nanoseconds) pair to represent a ROS2 timestamp
 @total_ordering
 class TimeStamp:
     def __init__(self, seconds, nanoseconds):
@@ -75,25 +70,28 @@ class TimeStamp:
         seconds = self.seconds + other.seconds
         nanoseconds = self.nanoseconds + other.nanoseconds
 
+        # ensure the nanoseconds variable is less than 1 second
         if nanoseconds >= 1000000000:
             seconds += 1
             nanoseconds -= 1000000000
+
         return TimeStamp(seconds, nanoseconds)
 
-    # absolute difference
+    # This returns the absolute difference of the timestamps
     def __sub__(self, other: TimeStamp) -> TimeStamp:
         if self == other:
             return TimeStamp(0,0)
-        if self > other:
-            if self.nanoseconds >= other.nanoseconds:
-                return TimeStamp(self.seconds - other.seconds, self.nanoseconds - other.nanoseconds)
-            else:
-                return TimeStamp(self.seconds - other.seconds - 1, 1000000000 + self.nanoseconds - other.nanoseconds)
-        else: # self < other
-            if other.nanoseconds >= self.nanoseconds:
-                return TimeStamp(other.seconds - self.seconds, other.nanoseconds - self.nanoseconds)
-            else:
-                return TimeStamp(other.seconds - self.seconds - 1, 1000000000 + other.nanoseconds - self.nanoseconds)
+        if self < other:
+            minuend = other
+            subtrahend = self
+        else: # self > other
+            minuend = self
+            subtrahend = other
+        
+        if minuend.nanoseconds >= subtrahend.nanoseconds:
+            return TimeStamp(minuend.seconds - subtrahend.seconds, minuend.nanoseconds - subtrahend.nanoseconds)
+        else: # convert 1 second of the minuend into nanoseconds
+            return TimeStamp((minuend.seconds - 1) - subtrahend.seconds, (minuend.nanoseconds + 1000000000) - subtrahend.nanoseconds)
 
     def get_seconds(self):
         return self.seconds
@@ -101,35 +99,35 @@ class TimeStamp:
     def get_nanoseconds(self):
         return self.nanoseconds
 
-class Position:
-    def __init__(self, x, y, z):
-        self.x = x
-        self.y = y
-        self.z = z
-    
-    def __str__(self):
-        return "(%s,%s,%s)" % (self.x, self.y, self.z)
-    
-    def __add__(self, other: Position) -> Position:
-        return Position(self.x + other.x, self.y + other.y, self.z + other.z)
-    
-    def __sub__(self, other: Position) -> Position:
-        return Position(self.x - other.x, self.y - other.y, self.z - other.z)
-    
-    def get_x(self):
-        return self.x
-    
-    def get_y(self):
-        return self.y
-    
-    def get_z(self):
-        return self.z
+class DataSpeedBridge(Node):
+    def __init__(self):
+        super().__init__('dataspeed_bridge')
 
-class DataSpeedNetworkBridge(Node):
-    def __init__(self, timestep_ms, ignore_position_z):
-        super().__init__('dataspeed_network_bridge')
-        self.timestep_ms = timestep_ms
-        self.ignore_position_z = ignore_position_z
+        # Declare Parameters
+        pd_address = ParameterDescriptor(
+            name='ip_address',
+            type=ParameterType.PARAMETER_STRING,
+            description='IPv4 Address for the server socket',
+            read_only=True
+        )
+        self.declare_parameter('ip_address', '127.0.0.1', pd_address)
+
+        pd_port = ParameterDescriptor(
+            name='port_number',
+            type=ParameterType.PARAMETER_INTEGER,
+            description='Port Number for the server socket',
+            integer_range=[IntegerRange(from_value=0, to_value=65535, step=1)],
+            read_only=True
+        )
+        self.declare_parameter('port_number', 8080, pd_port)
+
+        pd_timestep = ParameterDescriptor(
+            name='timestep_ms',
+            type=ParameterType.PARAMETER_INTEGER,
+            description='Step size in milliseconds between two iterations',
+            integer_range=[IntegerRange(from_value=1, to_value=999, step=1)],
+        )
+        self.declare_parameter('timestep_ms', 100, pd_timestep)
 
         # Create Subscriptions
         self.create_subscription(Odometry, '/novatel/odom', self.callback_odometry, 10)
@@ -137,21 +135,85 @@ class DataSpeedNetworkBridge(Node):
         self.create_subscription(VehicleVelocity, '/vehicle/vehicle_velocity', self.callback_velocity, 10)
         self.create_subscription(Bool, '/ds_bridge/terminate', self.callback_terminate, 10)
 
-        # Create Publications
-        self.stop_publisher = self.create_publisher(String, 'stop_cmd', 10)
+        # Initialize Variables
+        self.next_time = None
+        self.position = [0,0,0]
+        self.orientation = [0,0,0]
+        self.brake_torque = 0.0
+        self.velocity = 0.0
 
-        self.next_time = self.__get_timestep()
-        self.next_position = Position(0,0,0)
-        self.next_orientation = [0,0,0]
-        self.next_brake_torque = 0.0
-        self.next_velocity = 0.0
+    def callback_odometry(self, message):
+        timestamp = TimeStamp(message.header.stamp.sec, message.header.stamp.nanosec)
 
-        self.start_time = TimeStamp(0,0)
-        self.is_clock_set = False
+        self.__handle_timestamp(timestamp)
 
-        self.origin_position = Position(308223.4547550826,4334006.677150687,107.5224222894758) # NIST Gaithersburg
-        self.is_position_set = True # comment to use first value received from ns-3
+        self.position = [message.pose.pose.position.x, message.pose.pose.position.y, message.pose.pose.position.z]
+        self.get_logger().debug("received position %s at time %s" % (self.position, timestamp))
 
+        roll, pitch, yaw = quat2euler([
+            message.pose.pose.orientation.w,
+            message.pose.pose.orientation.x,
+            message.pose.pose.orientation.y,
+            message.pose.pose.orientation.z])
+        self.orientation = [math.degrees(roll), math.degrees(pitch), math.degrees(yaw)]
+        self.get_logger().debug("received orientation %s at time %s" % (self.orientation, timestamp))
+
+    def callback_brake(self, message):
+        timestamp = TimeStamp(message.header.stamp.sec, message.header.stamp.nanosec)
+
+        self.__handle_timestamp(timestamp)
+        
+        self.brake_torque = message.brake_torque_request
+        self.get_logger().debug("received brake torque %s at time %s" % (self.brake_torque, timestamp))
+
+    def callback_velocity(self, message):
+        timestamp = TimeStamp(message.header.stamp.sec, message.header.stamp.nanosec)
+
+        self.__handle_timestamp(timestamp)
+
+        self.velocity = message.vehicle_velocity_propulsion
+        self.get_logger().debug("received velocity %s at time %s" % (self.velocity, timestamp))
+
+    def callback_terminate(self, message):
+        if message.data:
+            self.get_logger().info("Exiting due to /ds_bridge/terminate")
+            # self.client_socket.send("-1\r\n".encode())
+            sys.exit()
+
+    def advance_time(self):
+        self.next_time += self.__get_timestep()
+        self.get_logger().info("Waiting until clock advances to %s" % self.next_time)
+
+    def __get_timestep(self):
+        return TimeStamp(0, self.get_parameter('timestep_ms').get_parameter_value().integer_value * 1000000)
+    
+    def __handle_timestamp(self, timestamp):
+        if self.next_time is None:
+            self.next_time = timestamp + self.__get_timestep()
+            self.get_logger().info("Using %s as the reference start time" % timestamp)
+
+        if timestamp > self.next_time:
+            self.advance_time() # this is not called when equal to allow messages for other topics to arrive
+
+def main(args=None):
+    rclpy.init(args=args)
+
+    ds_bridge = DataSpeedBridge()
+    rclpy.spin(ds_bridge)
+
+    ds_bridge.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+
+
+""" 
+from std_msgs.msg import String
+from rcl_interfaces.msg import SetParametersResult
+
+class DataSpeedNetworkBridge(Node):
+    def __init__(self, timestep_ms, ignore_position_z):
         # Setup the TCP Server for ns-3
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # allow immediate re-use of address if code restarted
@@ -160,78 +222,6 @@ class DataSpeedNetworkBridge(Node):
         self.get_logger().info("TCP/IP server at {}:1111 waiting for client connection...".format(IP_ADDRESS))
         # self.client_socket, client_address = self.server_socket.accept()
         #self.get_logger().info("accepted client with address {}".format(client_address))
-
-    def callback_odometry(self, message):
-        timestamp = TimeStamp(message.header.stamp.sec, message.header.stamp.nanosec)
-        position = Position(message.pose.pose.position.x, message.pose.pose.position.y, message.pose.pose.position.z)
-
-        if not self.is_clock_set:
-            self.start_time = timestamp
-            self.get_logger().info("Using %s as the reference start time" % self.start_time)
-            self.is_clock_set = True
-
-        timestamp_adjusted = timestamp - self.start_time
-        if timestamp_adjusted > self.next_time: # TODO: check edge cases for when things are uninitialized
-            self.advance_time() # this is not called when equal to allow messages for other topics to arrive
-
-        if not self.is_position_set:
-            self.origin_position = position
-            self.get_logger().info("Using %s as the reference start position" % self.origin_position)
-            self.is_position_set = True
-        position -= self.origin_position
-
-        if self.ignore_position_z:
-            # the car model origin is ~1.5 units above the ground, and the map plane will be drawn at 1 unit elevation
-            position -= Position(0,0,position.get_z()-3)
-        
-        self.next_position = position
-        self.get_logger().debug("received position %s at time %s" % (self.next_position, timestamp_adjusted))
-
-        roll, pitch, yaw = quat2euler([
-            message.pose.pose.orientation.w,
-            message.pose.pose.orientation.x,
-            message.pose.pose.orientation.y,
-            message.pose.pose.orientation.z])
-        self.next_orientation = [0, 0, math.degrees(yaw) + 90] # flat 2D map with the model offset by 90 degrees
-        self.get_logger().debug("received orientation %s at time %s" % (self.next_orientation, timestamp_adjusted))
-
-    def callback_brake(self, message):
-        timestamp = TimeStamp(message.header.stamp.sec, message.header.stamp.nanosec)
-        brake_torque = message.brake_torque_request
-
-        if not self.is_clock_set:
-            self.start_time = timestamp
-            self.get_logger().info("Using %s as the reference start time" % self.start_time)
-            self.is_clock_set = True
-
-        timestamp_adjusted = timestamp - self.start_time
-        if timestamp_adjusted > self.next_time: # TODO: check edge cases for when things are uninitialized
-            self.advance_time() # this is not called when equal to allow messages for other topics to arrive
-        
-        self.next_brake_torque = brake_torque
-        self.get_logger().debug("received brake torque %s at time %s" % (self.next_brake_torque, timestamp_adjusted))
-        
-    def callback_velocity(self, message):
-        timestamp = TimeStamp(message.header.stamp.sec, message.header.stamp.nanosec)
-        velocity = message.vehicle_velocity_propulsion
-
-        if not self.is_clock_set:
-            self.start_time = timestamp
-            self.get_logger().info("Using %s as the reference start time" % self.start_time)
-            self.is_clock_set = True
-
-        timestamp_adjusted = timestamp - self.start_time
-        if timestamp_adjusted > self.next_time: # TODO: check edge cases for when things are uninitialized
-            self.advance_time() # this is not called when equal to allow messages for other topics to arrive
-        
-        self.next_velocity = velocity
-        self.get_logger().debug("received velocity %s at time %s" % (self.next_velocity, timestamp_adjusted))
-
-    def callback_terminate(self, message):
-        if message.data:
-            self.get_logger().info("Exiting due to /ds_bridge/terminate")
-            # self.client_socket.send("-1\r\n".encode())
-            sys.exit()
 
     def advance_time(self):
         packet_data = [
@@ -260,16 +250,4 @@ class DataSpeedNetworkBridge(Node):
 
         self.next_time += self.__get_timestep()
         self.get_logger().info("Waiting until clock advances to %s" % self.next_time)
-    
-    def __get_timestep(self):
-        return TimeStamp(0, self.timestep_ms * 1000000)
-
-def main(args=None):
-    rclpy.init(args=args)
-    node = DataSpeedNetworkBridge(100, True)
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
-
-if __name__ == '__main__':
-    main()
+ """
