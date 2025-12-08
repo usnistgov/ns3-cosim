@@ -2,16 +2,30 @@ build_lib(
     LIBNAME ns3-cosim
     SOURCE_FILES
         model/gateway.cc
+        model/base-gateway.cc
+        model/text-gateway.cc
+        model/json-gateway.cc
         model/triggered-send-application.cc
         model/triggered-send-helper.cc
         model/external-mobility-model.cc
+        model/json-object.cc
     HEADER_FILES
+        library/json.hpp
         model/gateway.h
+        model/base-gateway.h
+        model/text-gateway.h
+        model/json-gateway.h
         model/triggered-send-application.h
         model/triggered-send-helper.h
         model/external-mobility-model.h
+        model/json-object.h
     LIBRARIES_TO_LINK
         ${libcore}
         ${libapplications}
         ${libmobility}
+        ${libwifi}
+        ${libcsma}
+        ${libinternet}
+        ${libnetwork}
+        ${libnr}
 )
