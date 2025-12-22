@@ -37,7 +37,7 @@
 #define GATEWAY_JSON_H
 
 #include "base-gateway.h"
-#include "json-object.h"
+#include "json-mobility-object.h"
 #include <ns3/json.hpp>
 
 #include <map>
@@ -65,11 +65,11 @@ class JSONGateway : public BaseGateway
     protected:
         static const std::string JSONGATEWAY_OBJECTS;
 
-        const std::map<uint, Ptr<JSONObject>>& GetObjects() const;
+        const std::map<uint, Ptr<JSONMobilityObject>>& GetObjects() const;
 
         // TODO: store pointers? create/destroy
 
-        Ptr<Node> AddObject(Ptr<JSONObject> object);
+        Ptr<Node> AddObject(Ptr<JSONMobilityObject> object);
 
         void RemoveObject(uint id);
 
@@ -120,7 +120,7 @@ class JSONGateway : public BaseGateway
 
         std::string m_delimiterMessage;         //!< The character sequence that indicates the end of a message
         
-        std::map<uint, Ptr<JSONObject>> m_objects; //!< A map that retuns the json object with the given identifier
+        std::map<uint, Ptr<JSONMobilityObject>> m_objects; //!< A map that retuns the json object with the given identifier
 
 };
 

@@ -31,11 +31,12 @@
  *  Raphael Barbau
 */
 
-#ifndef JSON_OBJECT_H
-#define JSON_OBJECT_H
+#ifndef JSON_MOBILITY_OBJECT_H
+#define JSON_MOBILITY_OBJECT_H
 
 #include "ns3/core-module.h"
 #include "ns3/mobility-module.h"
+#include "json-object.h"
 #include <ns3/json.hpp>
 #include <mutex>
 #include <string>
@@ -48,64 +49,71 @@ namespace ns3
 /**
  * A subclass of MobilityModel with JSON (de)serialization capability.
  */
-class JSONObject
+class JSONMobilityObject : public JSONObject, public MobilityModel
 {
   public:
+
+
     // JSON keys used for (de)serialization
     // Always keep in sync with intermediate server (in Python)
-    static const std::string JSONOBJECT_ID;
-    static const std::string JSONOBJECT_TYPE;
-    static const std::string JSONOBJECT_ALIVE;
+    static const std::string JSONMOBILITYOBJECT_POS_X;
+    static const std::string JSONMOBILITYOBJECT_POS_Y;
+    static const std::string JSONMOBILITYOBJECT_POS_Z;
+    static const std::string JSONMOBILITYOBJECT_VEL_X;
+    static const std::string JSONMOBILITYOBJECT_VEL_Y;
+    static const std::string JSONMOBILITYOBJECT_VEL_Z;
 
     /**
      * @brief Create a new JSON object
      */
-    JSONObject();
+    JSONMobilityObject();
 
-    JSONObject(const json& data);
+    JSONMobilityObject(const json& data);
 
-    bool IsAlive() const;
-    void SetAlive(bool alive);
+    /**
+     * \brief Register this type.
+     * \return The Object TypeId.
+     */
+    static TypeId GetTypeId();
 
-    uint GetId() const;
-    void SetId(int id);
+    /**
+     * @brief Set the 3-dimensional velocity.
+     * @param velocity the value to set
+     */
+    void SetVelocity(const Vector& velocity);
+    
 
-    virtual std::string GetJSONType() const = 0;
+    // Needed to resolve diamond inheritance
+
+  protected:
 
     /**
      * @brief Deserialize the given JSON data into the object.
      */
-    void Deserialize(const json& data);
+    virtual void DoDeserialize(const json& data);
 
     /**
      * @brief Serialize the object into the given JSON data.
      */
-    void Serialize(json& data) const;
-
-    static bool IsNumber(const std::string key, const json& value);
-    static bool IsInt(const std::string key, const json& value);
-    static bool IsUInt(const std::string key, const json& value);
-    static bool IsFloat(const std::string key, const json& value);
-    static bool IsBool(const std::string key, const json& value);
-    static bool IsString(const std::string key, const json& value);
-
-    static bool GetBool(const json& value);
-    static int GetInt(const json& value);
-    static uint GetUInt(const json& value);
-    static float GetFloat(const json& value);
-    static std::string GetString(const json& value);
-    
-  protected:
     virtual void DoSerialize(json& data) const;
-    virtual void DoDeserialize(const json& data);
+
     virtual void PostDeserialize();
+    
   private:
 
-    static int nextId; //!< the next JSON object identifier 
+    float m_pos_x;
+    float m_pos_y;
+    float m_pos_z;
+    float m_vel_x;
+    float m_vel_y;
+    float m_vel_z;
 
-    int m_id; //!< the identifier of this object 
-    bool m_alive;
+    void DoSetPosition(const Vector& position) override;
+
+    Vector DoGetPosition() const override;
+
+    Vector DoGetVelocity() const override;
 
 };
 }
-#endif /* JSON_OBJECT_H */
+#endif /* JSON_MOBILITY_OBJECT_H */

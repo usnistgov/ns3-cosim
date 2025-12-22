@@ -130,7 +130,7 @@ std::string JSONGateway::PopulateResponseMessage() const
     data.emplace(JSONGATEWAY_TIME_NS, Simulator::Now().GetNanoSeconds());
     std::vector<json> objects;
 
-    std::map<uint, Ptr<JSONObject>>::const_iterator it;
+    std::map<uint, Ptr<JSONMobilityObject>>::const_iterator it;
     for (it = m_objects.begin(); it != m_objects.end(); it++)
     {
         json object;
@@ -144,12 +144,12 @@ std::string JSONGateway::PopulateResponseMessage() const
 
 /* ========== PROTECTED MEMBER FUNCTIONS ====================================== */
 
-const std::map<uint, Ptr<JSONObject>>& JSONGateway::GetObjects() const
+const std::map<uint, Ptr<JSONMobilityObject>>& JSONGateway::GetObjects() const
 {
     return m_objects;
 }
 
-Ptr<Node> JSONGateway::AddObject(Ptr<JSONObject> object)
+Ptr<Node> JSONGateway::AddObject(Ptr<JSONMobilityObject> object)
 {
     uint id = object->GetId();
     if (m_objects.find(id) != m_objects.end())

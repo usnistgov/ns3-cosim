@@ -9,6 +9,7 @@ build_lib(
         model/triggered-send-helper.cc
         model/external-mobility-model.cc
         model/json-object.cc
+        model/json-mobility-object.cc
     HEADER_FILES
         library/json.hpp
         model/gateway.h
@@ -19,6 +20,7 @@ build_lib(
         model/triggered-send-helper.h
         model/external-mobility-model.h
         model/json-object.h
+        model/json-mobility-object.h
     LIBRARIES_TO_LINK
         ${libcore}
         ${libapplications}

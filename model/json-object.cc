@@ -36,8 +36,6 @@ namespace ns3
 {
 NS_LOG_COMPONENT_DEFINE("JSONObject");
 
-NS_OBJECT_ENSURE_REGISTERED(JSONObject);
-
 int JSONObject::nextId = 0;
 
 static std::mutex idMutex;
@@ -46,12 +44,6 @@ static std::mutex idMutex;
 const std::string JSONObject::JSONOBJECT_ID = "id";
 const std::string JSONObject::JSONOBJECT_TYPE = "type";
 const std::string JSONObject::JSONOBJECT_ALIVE = "alive";
-const std::string JSONObject::JSONOBJECT_POS_X = "pos_x";
-const std::string JSONObject::JSONOBJECT_POS_Y = "pos_y";
-const std::string JSONObject::JSONOBJECT_POS_Z = "pos_z";
-const std::string JSONObject::JSONOBJECT_VEL_X = "vel_x";
-const std::string JSONObject::JSONOBJECT_VEL_Y = "vel_y";
-const std::string JSONObject::JSONOBJECT_VEL_Z = "vel_z";
 
 JSONObject::JSONObject()
 {
@@ -81,14 +73,14 @@ JSONObject::JSONObject(const json& data)
 }
 
 
-TypeId JSONObject::GetTypeId()
-{
-    static TypeId tid =
-        TypeId("ns3::JSONObject")
-            .SetParent<MobilityModel>()
-            .SetGroupName("V2X");
-    return tid;
-}
+// TypeId JSONObject::GetTypeId()
+// {
+//     static TypeId tid =
+//         TypeId("ns3::JSONObject")
+//             .SetParent<Object>()
+//             .SetGroupName("V2X");
+//     return tid;
+// }
 
 // Getters/setters
 
@@ -110,36 +102,15 @@ void JSONObject::SetId(int id)
     m_id = id;
 }
 
-void JSONObject::SetVelocity(const Vector& velocity)
-{
-    if (velocity != m_velocity)
-    {
-        m_velocity = velocity;
-        NotifyCourseChange();
-    }
-}
-
-void JSONObject::DoSetPosition(const Vector& position)
-{
-    if (position != m_position)
-    {
-        m_position = position; // this should check for a course change
-    }
-}
-
-Vector JSONObject::DoGetPosition() const
-{
-    return m_position;
-}
-
-Vector JSONObject::DoGetVelocity() const
-{
-    return m_velocity;
-}
-
 // Serialization/Deserialization
 
 void JSONObject::Deserialize(const json& obj)
+{
+    DoDeserialize(obj);
+    PostDeserialize();
+}
+
+void JSONObject::DoDeserialize(const json& obj)
 {
     NS_ASSERT(obj.is_object());
     for (json::const_iterator it = obj.begin(); it != obj.end(); ++it)
@@ -150,36 +121,36 @@ void JSONObject::Deserialize(const json& obj)
             m_id = GetUInt(value);
         else if (key == JSONOBJECT_ALIVE && IsBool(key, value))
             m_alive = GetBool(value);
-        else if (key == JSONOBJECT_POS_X && IsFloat(key, value))
-            m_position.x = GetFloat(value);
-        else if (key == JSONOBJECT_POS_Y && IsFloat(key, value))
-            m_position.y = GetFloat(value);
-        else if (key == JSONOBJECT_POS_Z && IsFloat(key, value))
-            m_position.z = GetFloat(value);
-        else if (key == JSONOBJECT_VEL_X && IsFloat(key, value))
-            m_velocity.x = GetFloat(value);
-        else if (key == JSONOBJECT_VEL_Y && IsFloat(key, value))
-            m_velocity.y = GetFloat(value);
-        else if (key == JSONOBJECT_VEL_Z && IsFloat(key, value))
-            m_velocity.z = GetFloat(value);
         // else, could be handled by subclasses
     }
-    NotifyCourseChange();
 }
 
+
+void JSONObject::PostDeserialize()
+{
+}
 
 void JSONObject::Serialize(json& obj) const
 {
-    obj.emplace(JSONOBJECT_ID, m_id);
-    obj.emplace(JSONOBJECT_ALIVE, m_alive);
-    obj.emplace(JSONOBJECT_POS_X, m_position.x);
-    obj.emplace(JSONOBJECT_POS_Y, m_position.y);
-    obj.emplace(JSONOBJECT_POS_Z, m_position.z);
-    obj.emplace(JSONOBJECT_VEL_X, m_velocity.x);
-    obj.emplace(JSONOBJECT_VEL_Y, m_velocity.y);
-    obj.emplace(JSONOBJECT_VEL_Z, m_velocity.z);
+    DoSerialize(obj);
 }
 
+void JSONObject::DoSerialize(json& obj) const
+{
+    obj.emplace(JSONOBJECT_ID, m_id);
+    obj.emplace(JSONOBJECT_TYPE, GetJSONType());
+    obj.emplace(JSONOBJECT_ALIVE, m_alive);
+}
+
+bool JSONObject::IsNumber(const std::string key, const json& value)
+{
+    if (!value.is_number())
+    {
+        NS_LOG_WARN("Attribute '" + key + "' must be a number");
+        return false;
+    }
+    return true;
+}
 bool JSONObject::IsBool(const std::string key, const json& value)
 {
     if (!value.is_boolean())
